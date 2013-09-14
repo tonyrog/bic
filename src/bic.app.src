@@ -1,0 +1,6 @@
+{application, bic,
+ [{description, "Beam interpreted C"},
+  {vsn, "1.0"},
+  {env, []},
+  {applications,[kernel,stdlib]}
+  ]}.
