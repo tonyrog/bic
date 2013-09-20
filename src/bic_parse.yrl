@@ -55,15 +55,15 @@ primary_expr -> '(' expr ')' : '$2'.
 
 postfix_expr -> primary_expr : '$1'.
 postfix_expr -> postfix_expr '[' expr ']' : 
-		    #bic_expr {line=line('$1'),op='[]',arg1='$1',arg2='$3'}.
+		    #bic_binary {line=line('$1'),op='[]',arg1='$1',arg2='$3'}.
 postfix_expr -> postfix_expr '(' ')' : 
 		    #bic_call {line=line('$1'),func='$1',args=[]}.
 postfix_expr -> postfix_expr '(' argument_expr_list ')' :
 		    #bic_call {line=line('$1'),func='$1',args='$3'}.
 postfix_expr -> postfix_expr '.' identifier : 
-		    #bic_expr {line=line('$1'),op='.',arg1='$1',arg2=id('$3') }.
+		    #bic_binary {line=line('$1'),op='.',arg1='$1',arg2=id('$3') }.
 postfix_expr -> postfix_expr '->' identifier : 
-		    #bic_expr {line=line('$1'),op='->',arg1='$1',arg2=id('$3')}.
+		    #bic_binary {line=line('$1'),op='->',arg1='$1',arg2=id('$3')}.
 postfix_expr -> postfix_expr '++' : 
 		    #bic_unary {line=line('$1'),op='++',arg='$1'}.
 postfix_expr -> postfix_expr '--' : 
@@ -93,63 +93,63 @@ unary_operator -> '!' : '$1'.
 
 cast_expr -> unary_expr : '$1'.
 cast_expr -> '(' type_name ')' cast_expr :
-		 #bic_expr {line=line('$1'),op=cast,arg1='$2',arg2='$4'}.
+		 #bic_binary {line=line('$1'),op=cast,arg1='$2',arg2='$4'}.
 
 multiplicative_expr -> cast_expr : '$1'.
 multiplicative_expr -> multiplicative_expr '*' cast_expr : 
-		   #bic_expr { line=line('$2'), op='*',arg1='$1',arg2='$3'}.
+		   #bic_binary { line=line('$2'), op='*',arg1='$1',arg2='$3'}.
 multiplicative_expr -> multiplicative_expr '/' cast_expr :
-		   #bic_expr { line=line('$2'), op='/',arg1='$1',arg2='$3'}.
+		   #bic_binary { line=line('$2'), op='/',arg1='$1',arg2='$3'}.
 multiplicative_expr -> multiplicative_expr '%' cast_expr :
-		   #bic_expr { line=line('$2'), op='%',arg1='$1',arg2='$3'}.
+		   #bic_binary { line=line('$2'), op='%',arg1='$1',arg2='$3'}.
 
 additive_expr -> multiplicative_expr : '$1'.
 additive_expr -> additive_expr '+' multiplicative_expr :
-		   #bic_expr { line=line('$2'), op='+',arg1='$1',arg2='$3'}.
+		   #bic_binary { line=line('$2'), op='+',arg1='$1',arg2='$3'}.
 additive_expr -> additive_expr '-' multiplicative_expr :
-		   #bic_expr { line=line('$2'), op='-',arg1='$1',arg2='$3'}.
+		   #bic_binary { line=line('$2'), op='-',arg1='$1',arg2='$3'}.
 
 shift_expr -> additive_expr : '$1'.
 shift_expr -> shift_expr '<<' additive_expr :
-		   #bic_expr { line=line('$2'),op='<<',arg1='$1',arg2='$3'}.
+		   #bic_binary { line=line('$2'),op='<<',arg1='$1',arg2='$3'}.
 shift_expr -> shift_expr '>>' additive_expr :
-		  #bic_expr { line=line('$2'),op='>>',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='>>',arg1='$1',arg2='$3'}.
 
 relational_expr -> shift_expr : '$1'.
 relational_expr -> relational_expr '<' shift_expr :
-		  #bic_expr { line=line('$2'),op='<',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='<',arg1='$1',arg2='$3'}.
 relational_expr -> relational_expr '>' shift_expr :
-		  #bic_expr { line=line('$2'),op='>',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='>',arg1='$1',arg2='$3'}.
 relational_expr -> relational_expr '<=' shift_expr :
-		  #bic_expr { line=line('$2'),op='<=',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='<=',arg1='$1',arg2='$3'}.
 relational_expr -> relational_expr '>=' shift_expr :
-		  #bic_expr { line=line('$2'),op='>=',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='>=',arg1='$1',arg2='$3'}.
 
 equality_expr -> relational_expr : '$1'.
 equality_expr -> equality_expr '==' relational_expr :
-		  #bic_expr { line=line('$2'),op='==',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='==',arg1='$1',arg2='$3'}.
 equality_expr -> equality_expr '!=' relational_expr :
-		  #bic_expr { line=line('$2'),op='!=',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='!=',arg1='$1',arg2='$3'}.
 
 and_expr -> equality_expr : '$1'.
 and_expr -> and_expr '&' equality_expr :
-		  #bic_expr { line=line('$2'),op='&',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='&',arg1='$1',arg2='$3'}.
 
 exclusive_or_expr -> and_expr : '$1'.
 exclusive_or_expr -> exclusive_or_expr '^' and_expr :
-		  #bic_expr { line=line('$2'),op='^',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='^',arg1='$1',arg2='$3'}.
 
 inclusive_or_expr -> exclusive_or_expr : '$1'.
 inclusive_or_expr -> inclusive_or_expr '|' exclusive_or_expr :
-		  #bic_expr { line=line('$2'),op='|',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='|',arg1='$1',arg2='$3'}.
 
 logical_and_expr -> inclusive_or_expr : '$1'.
 logical_and_expr -> logical_and_expr '&&' inclusive_or_expr :
-		  #bic_expr { line=line('$2'),op='&&',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='&&',arg1='$1',arg2='$3'}.
 
 logical_or_expr -> logical_and_expr : '$1'.
 logical_or_expr -> logical_or_expr '||' logical_and_expr :
-		  #bic_expr { line=line('$2'),op='||',arg1='$1',arg2='$3'}.
+		  #bic_binary { line=line('$2'),op='||',arg1='$1',arg2='$3'}.
 
 conditional_expr -> logical_or_expr : '$1'.
 conditional_expr -> logical_or_expr '?' logical_or_expr ':' conditional_expr :
@@ -173,7 +173,7 @@ assignment_operator -> '|=' : '$1'.
 
 expr -> assignment_expr : '$1'.
 expr -> expr ',' assignment_expr : 
-     	#bic_expr { line=line('$1'), op=',',arg1='$1',arg2='$3'}.
+     	#bic_binary { line=line('$1'), op=',',arg1='$1',arg2='$3'}.
 
 constant_expr -> conditional_expr : '$1'.
 
@@ -263,9 +263,9 @@ struct_or_union_specifier -> struct_or_union identifier :
 struct_or_union -> 'struct' : '$1'.
 struct_or_union -> 'union' : '$1'.
 
-struct_declaration_list -> struct_declaration : ['$1'].
+struct_declaration_list -> struct_declaration : '$1'.
 struct_declaration_list -> struct_declaration_list struct_declaration :
-			'$1'++['$2'].
+			'$1'++'$2'.
 
 struct_declaration -> type_specifier_list struct_declarator_list ';' :
 		 map(fun(D) -> D#bic_decl { type='$1'++D#bic_decl.type} end,

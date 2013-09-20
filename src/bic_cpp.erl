@@ -1182,7 +1182,7 @@ check_macro_args(Ns,Ts) ->
 
 %% Evaluate a #if expression 
 %% return 0 or 1
-eval(S,#bic_expr { op=Op, arg1=Arg1, arg2=Arg2}) ->
+eval(S,#bic_binary { op=Op, arg1=Arg1, arg2=Arg2}) ->
     case Op of
 	'+' -> eval(S,Arg1)+eval(S,Arg2);
 	'-' -> eval(S,Arg1)-eval(S,Arg2);

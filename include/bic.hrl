@@ -19,29 +19,29 @@
 
 -record(bic_constant,
 	{
-	  line,
-	  base,  %% 8,10,16 | char | float
-	  value  %% string rep of value
-	 }).
+	  line :: integer(),
+	  base :: 8 | 10 | 16 | char | float | string,
+	  value :: string()
+	}).
 	  
 -record(bic_unary,
 	{
-	  line,
-	  op,
+	  line :: integer(),
+	  op   :: atom(),
 	  arg
 	 }).
 
--record(bic_expr,
+-record(bic_binary,
 	{
-	  line,
-	  op,
+	  line :: integer(),
+	  op   :: atom(),
 	  arg1,
 	  arg2
 	 }).
 
 -record(bic_call,
 	{
-	  line,
+	  line :: integer(),
 	  func,
 	  args
 	 }).
@@ -49,7 +49,7 @@
 %%  cond ? then : else FIXME? GNU:  cond ? then
 -record(bic_ifexpr,
 	{
-	  line,
+	  line :: integer(),
 	  test,
 	  then,
 	  else
@@ -57,7 +57,7 @@
 
 -record(bic_assign,
 	{
-	  line,
+	  line :: integer(),
 	  op,
 	  lhs,
 	  rhs
@@ -66,7 +66,7 @@
 %% Function declaration
 -record(bic_function,
 	{
-	  line,       %% line number
+	  line :: integer(),       %% line number
 	  name,
 	  storage,    %% list of specifiers & return type
 	  type,       %% {fn,..} function argument type with formal params
@@ -77,17 +77,17 @@
 %% variable & element declarations
 -record(bic_decl,
 	{
-	  line,    %% line number
+	  line :: integer(),    %% line number
 	  name,    %% optional identifier
 	  type=[], %% type (specifier list)
 	  size,    %% optional constant bit field size
-	  value    %%  init value
+	  value    %% init value assignment-expr | [assignment-expr]
 	}).
 
 %% Specialize declaration - simplify processing a bit
 -record(bic_typedef,
 	{
-	  line,    %% line number
+	  line :: integer(),    %% line number
 	  name,    %% name of type defined
 	  type=[], %% type spec
 	  size,    %% optional constant bit field size
@@ -96,30 +96,28 @@
 
 -record(bic_struct,
 	{
-	  line,
+	  line :: integer(),
 	  name,
 	  elems
 	 }).
 
 -record(bic_union,
 	{
-	  line,
+	  line :: integer(),
 	  name,
 	  elems
 	 }).
 
 -record(bic_enum,
 	{
-	  line,
+	  line :: integer(),
 	  name,   %% string() | undefined
 	  elems   %% [{id,value|undefined}]
 	 }).
 
-
-
 -record(bic_for,
 	{
-	  line,    %% line number
+	  line :: integer(),    %% line number
 	  init,
 	  test,
 	  update,
@@ -128,21 +126,21 @@
 
 -record(bic_while,
 	{
-	  line,    %% line number
+	  line :: integer(),    %% line number
 	  test,
 	  body 
 	 }).
 
 -record(bic_do,
 	{
-	  line,    %% line number
-	  test,
-	  body 
+	  line :: integer(),    %% line number
+	  body,
+	  test
 	 }).
 
 -record(bic_if,
 	  {
-	  line,
+	  line :: integer(),
 	  test,
 	  then,
 	  else
@@ -150,27 +148,27 @@
 
 -record(bic_switch,
 	{
-	  line,
+	  line :: integer(),
 	  expr,
 	  body 
 	 }).
 
 -record(bic_case,
 	{
-	  line,
+	  line :: integer(),
 	  expr,
 	  code
 	 }).
 
 -record(bic_default,
 	{
-	  line,
+	  line :: integer(),
 	  code
 	 }).
 
 -record(bic_label,
 	{
-	  line,
+	  line :: integer(),
 	  name,
 	  code
 	 }).
@@ -178,29 +176,29 @@
 	
 -record(bic_goto,
 	{
-	  line,
+	  line :: integer(),
 	  label
 	 }).
 
 -record(bic_continue,
 	{
-	  line
+	  line :: integer()
 	 }).
 
 -record(bic_break,
 	{
-	  line
+	  line :: integer()
 	 }).
 	
 -record(bic_return,
 	{
-	  line,
+	  line :: integer(),
 	  expr
 	 }).
 
 -record(bic_empty,
 	{
-	  line
+	  line :: integer()
 	}).
 
 	  

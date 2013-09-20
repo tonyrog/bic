@@ -63,8 +63,13 @@ string(String, Env) ->
 		    io:format("~s:~w: ~s\n",
 			      ["*string*",Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
-		{ok,_List} ->
-		    Res
+		{ok,Forms} ->
+		    case bic_lint:forms(Forms) of
+			{ok,_LintForms} ->
+			    {ok,_LintForms};
+			Err={error,_} ->
+			    Err
+		    end
 	    end;
 	Error ->
 	    Error
@@ -101,8 +106,13 @@ file(File,Env) ->
 		    io:format("~s:~w: ~s\n",
 			      [File,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
-		{ok,_List} ->
-		    Res
+		{ok,Forms} ->
+		    case bic_lint:forms(Forms) of
+			{ok,_LintForms} ->
+			    {ok,_LintForms};
+			Err={error,_} ->
+			    Err
+		    end
 	    end;
 	Error ->
 	    Error
