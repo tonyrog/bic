@@ -64,9 +64,9 @@ string(String, Env) ->
 			      ["*string*",Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
 		{ok,Forms} ->
-		    case bic_lint:forms(Forms) of
+		    case bic_lint:forms("*string*", Forms) of
 			{ok,_LintForms} ->
-			    {ok,_LintForms};
+			    {ok,Forms};
 			Err={error,_} ->
 			    Err
 		    end
@@ -107,9 +107,9 @@ file(File,Env) ->
 			      [File,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
 		{ok,Forms} ->
-		    case bic_lint:forms(Forms) of
+		    case bic_lint:forms(File,Forms) of
 			{ok,_LintForms} ->
-			    {ok,_LintForms};
+			    {ok,Forms};
 			Err={error,_} ->
 			    Err
 		    end
@@ -123,11 +123,3 @@ scan(Fd) ->
     Res = bic_scan:scan(Fd),
     %% io:format("Scan: ~p\n", [Res]),
     Res.
-
-
-
-
-
-
-
-

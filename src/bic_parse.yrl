@@ -293,11 +293,11 @@ enumerator_list -> enumerator : ['$1'].
 enumerator_list -> enumerator_list ',' enumerator : '$1'++['$3'].
 
 enumerator -> identifier : { arg('$1'),undefined}.
-enumerator -> identifier '=' constant_expr : {arg('$1'),'$3'}.
+enumerator -> identifier '=' constant_expr : {arg('$1'),line('$1'),'$3'}.
 
 declarator -> declarator2 : '$1'.
 declarator -> pointer declarator2 : 
-           '$2'#bic_decl { type='$1'++'$2'#bic_decl.type}.
+		  '$2'#bic_decl { type=add_decl('$1','$2'#bic_decl.type) }.
 
 declarator2 -> identifier : 
 		   #bic_decl { line=line('$1'), name=arg('$1') }.
@@ -314,10 +314,10 @@ declarator2 -> declarator2 '(' parameter_type_list ')' :
 declarator2 -> declarator2 '(' parameter_identifier_list ')' :
            '$1'#bic_decl { type=[{fn,'$3'}|'$1'#bic_decl.type]}.
 
-pointer -> '*' : [pointer].
-pointer -> '*' type_specifier_list : [pointer|'$2'].
-pointer -> '*' pointer : [pointer|'$2'].
-pointer -> '*' type_specifier_list pointer : [pointer|['$2'++'$3']].
+pointer -> '*' : [{pointer,['*'],[]}].
+pointer -> '*' type_specifier_list : [{pointer,['*'],'$2'}].
+pointer -> '*' pointer : add_pointer('$2').
+pointer -> '*' type_specifier_list pointer : [{pointer,['*'],'$2'++['$3']}].
 
 type_specifier_list -> type_specifier : ['$1'].
 type_specifier_list -> type_specifier_list type_specifier : '$1'++['$2'].
@@ -344,8 +344,7 @@ type_name -> type_specifier_list abstract_declarator : '$1'++'$2'.
 
 abstract_declarator -> pointer : '$1'.
 abstract_declarator -> abstract_declarator2 : '$1'.
-abstract_declarator -> pointer abstract_declarator2 : 
-			   '$1'++'$2'.
+abstract_declarator -> pointer abstract_declarator2 : add_decl('$1','$2').
 
 abstract_declarator2 -> '(' abstract_declarator ')' : 
 		     '$2'.
@@ -481,6 +480,14 @@ init() ->
 	  (_) -> ok
       end, get()).
 
+add_pointer([{pointer,Ptr,Spec}]) ->
+    [{pointer,['*'|Ptr],Spec}].
+
+add_decl([{pointer,Ptr,Spec}], Decl) ->
+    [{pointer,Ptr,Spec++Decl}].
+
+
+
 id({identifier,Line,Name}) ->
     #bic_id { line=Line, name=Name}.
 
@@ -528,6 +535,3 @@ line([H|_]) -> line(H);
 line({_,Line}) -> Line;
 line({_,Line,_}) -> Line;
 line({_,Line,_,_}) -> Line.
-
-
-
