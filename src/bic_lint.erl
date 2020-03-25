@@ -316,7 +316,9 @@ decls([D|Ds], S0) ->
     {Ds1, S2} = decls(Ds, S1),
     {[D1|Ds1],S2};
 decls([], S0) ->
-    {[], S0}.
+    {[], S0};
+decls(undefined, S0) ->
+    {undefined, S0}.
 	  
 
 struct(X=#bic_struct{line=Ln},S0) ->
@@ -414,11 +416,15 @@ enums([], Acc, S0) ->
 
 enumerate([{ID,Ln,undefined}|Enums], Acc, I) ->
     enumerate(Enums, [{ID,Ln,I}|Acc], I+1);
-enumerate([E={_ID,_Ln,Value}|Enums], Acc, _I) ->
-    enumerate(Enums, [E|Acc], Value+1);
+enumerate([E={ID,Ln,Value}|Enums], Acc, I) ->
+    case Value of
+	#cconst { value = Value1 } when is_integer(Value1) ->
+	    enumerate(Enums, [{ID,Ln,Value1}|Acc], I);
+	_ -> %% fixme eval
+	    enumerate(Enums, [E|Acc], I)
+    end;
 enumerate([], Acc, _I) ->
     lists:reverse(Acc).
-    
 
 type(undefined,Ln,S) ->
     {#ctype{line=Ln}, S};
@@ -443,6 +449,9 @@ type_([X|Xs], T, S) ->
 	const    -> type_(Xs, T#ctype {const=true}, S);
 	volatile -> type_(Xs, T#ctype {volatile=true}, S);
 	{array,Dim} -> add_dimension(Dim, T, Xs, S);
+	[{pointer,Ptr,Ys}] ->
+	    {T1,S1} = type_(Ys, #ctype{line=T#ctype.line}, S),
+	    type_(Xs,T#ctype { pointer=Ptr, type=T1 },S1);
 	{pointer,Ptr,Ys} ->
 	    {T1,S1} = type_(Ys, #ctype{line=T#ctype.line}, S),
 	    type_(Xs,T#ctype { pointer=Ptr, type=T1 },S1);

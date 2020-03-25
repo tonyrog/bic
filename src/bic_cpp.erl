@@ -239,8 +239,8 @@ init([{string,String},UserOpts]) ->
     QInclude = init_qinclude(UserOpts,[]),
     S = #s { file = File,
 	     readf = fun() -> eof end,
-	     line = 1,
-	     line1 = 1,
+	     line = 0,
+	     line1 = 0,
 	     inc_level = 0,
 	     pwd = ".",
 	     include = Include,
@@ -263,8 +263,8 @@ init([{file,File},UserOpts]) ->
 	    S = #s { file = File,
 		     readf = fun() -> file:read(Fd, ?CHUNK_SIZE) end,
 		     fd = Fd,
-		     line = 1,
-		     line1 = 1,
+		     line = 0,
+		     line1 = 0,
 		     inc_level = 0,
 		     pwd = ".",
 		     include = Include,
@@ -867,10 +867,10 @@ directive(S, Ts, ?TRUE) ->
 	    {'#endif', S};
 
 	%% #define <id>['(' <args> ')'] <value>
-	[{identifier,_,"define"},{blank,_,_},
-	 {identifier,_,Var},{blank,_,_},{char,Ln,?LP}|Body] ->
-	    S1 = define_macro(S,Var,[{char,Ln,?LP}|Body]),
-	    {empty,S1};
+%%	[{identifier,_,"define"},{blank,_,_},
+%%	 {identifier,_,Var},{blank,_,_},{char,Ln,?LP}|Body] ->
+%%	    S1 = define_macro(S,Var,[{char,Ln,?LP}|Body]),
+%%	    {empty,S1};
 	[{identifier,_,"define"},{blank,_,_},
 	 {identifier,_,Var},{char,Ln,?LP}|Body] ->
 	    S1 = define_macro(S,Var,[{char,Ln,?LP}|Body]),
@@ -1077,7 +1077,7 @@ restore(S,Tok) ->
 	       }|Is] ->
 	    ?dbg("Restore file ~s:~w\n", [File,Line]),
 	    LBuf = S#s.lbuf ++ [auto_line(Line,File,2)],
-	    S1 = S#s { file=File, fd = Fd, line = Line, line1 = Line1,
+	    S1 = S#s { file=File, fd = Fd, line=Line, line1=Line1,
 		       inc_level = Level, if_stack = Stack, 
 		       inc_stack = Is,
 		       pwd = Pwd, 
@@ -1329,6 +1329,8 @@ define_macro(S, Name, Ts) ->
 	{ok,Ps,Ts1} ->
 	    Ts2 = trim_(Ts1),
 	    define(S,Name,{Ps,Ts2});
+%%	{error, "argument error"} -> %% kludge?
+%%	    define(S,Name,trim_(Ts));
 	{error,Msg} ->
 	    error(S, "~s in macro argument list", [Msg]),
 	    S

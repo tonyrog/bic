@@ -486,8 +486,6 @@ add_pointer([{pointer,Ptr,Spec}]) ->
 add_decl([{pointer,Ptr,Spec}], Decl) ->
     [{pointer,Ptr,Spec++Decl}].
 
-
-
 id({identifier,Line,Name}) ->
     #bic_id { line=Line, name=Name}.
 

@@ -44,13 +44,7 @@ string(String, Env) ->
 	    bic_scan:init(),  %% setup some dictionay stuff
 	    bic_parse:init(), %% setup some dictionay stuff
 	    Res = (catch bic_parse:parse_and_scan({bic, scan, [Fd]})),
-	    io:format("Variable dump:\n"),
-	    lists:foreach(
-	      fun({Name,[{string,_,Value}]}) ->
-		      io:format("~s: \"~s\"\n", [Name,Value]);
-		 ({Name, Value}) ->
-		      io:format("~s: ~p\n", [Name,Value])
-	      end, bic_cpp:values(Fd)),
+	    %% maybe_dump_cpp_variables(Fd),
 	    bic_cpp:close(Fd),
 	    case Res of 
 		{error,{{Fn,Ln},Mod,Message}} when is_integer(Ln) ->
@@ -75,7 +69,6 @@ string(String, Env) ->
 	    Error
     end.
 
-
 file(File) ->
     file(File,[]).
 
@@ -87,13 +80,7 @@ file(File,Env) ->
 	    bic_scan:init(),  %% setup some dictionay stuff
 	    bic_parse:init(), %% setup some dictionay stuff
 	    Res = (catch bic_parse:parse_and_scan({bic, scan, [Fd]})),
-	    io:format("Variable dump:\n"),
-	    lists:foreach(
-	      fun({Name,[{string,_,Value}]}) ->
-		      io:format("~s: \"~s\"\n", [Name,Value]);
-		 ({Name, Value}) ->
-		      io:format("~s: ~p\n", [Name,Value])
-	      end, bic_cpp:values(Fd)),
+	    %% maybe_dump_cpp_variables(Fd),
 	    bic_cpp:close(Fd),
 	    case Res of 
 		{error,{{Fn,Ln},Mod,Message}} when is_integer(Ln) ->
@@ -117,6 +104,15 @@ file(File,Env) ->
 	Error ->
 	    Error
     end.
+
+maybe_dump_variables(Fd) ->
+    io:format("Variable dump:\n"),
+    lists:foreach(
+      fun({Name,[{string,_,Value}]}) ->
+	      io:format("~s: \"~s\"\n", [Name,Value]);
+	 ({Name, Value}) ->
+	      io:format("~s: ~p\n", [Name,Value])
+      end, bic_cpp:values(Fd)).
 
 %% Scanner wrapper (simplify debugging)
 scan(Fd) ->
