@@ -1,19 +1,23 @@
-BIC Beam Interpreted C code
-===========================
+BIC 
+===
 
-BIC is first of all a C parser, it contains a lexer,
-parser, linter and a preprocessor.
+C parser and preprocessor written i Erlang.
+Originally created for emulating C code but is
+mainly used to parse and produce C-api header files.
 
-The code could be retargeted to anything you like,
-but my main objective is to experniment with generating
-erlang/beam code.
+Use simply like
 
-Extension that I have been thinking of to support interface
-Erlang a bit better is to include the Erlang simple namespace
-scheme. Thinking about it it may make sense to implement that
-generally for the C language.
+    bic:file("fib.c")
 
-In other words allow calls like module:function(args)
+will return declarations found in the C file
+
+    -include:lib("bic/include/bic.hrl")
+	
+contains the record definitions needed to handle
+the returned value.
 
 
+    bic:command([AtomNamedFile])
+	
+Can be used to do simple tests from command line
 

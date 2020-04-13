@@ -11,6 +11,14 @@
 
 -include("../include/bic.hrl").
 
+-type cpp_option() :: {define,Name::string(),Value::term()} |
+		      {include, Path::string()} |
+		      {qinclude, Path::string()}.
+
+-type cpp_options() :: [cpp_option()].
+
+-type bic() :: [#bic_function{} | #bic_decl{}].
+
 command() ->
     io:format("bic: no input files\n"),
     halt(1).
@@ -18,23 +26,20 @@ command() ->
 command([]) ->
     io:format("bic: no input files\n"),
     halt(1);
-command([File]) when is_atom(File) ->
-    case file(atom_to_list(File)) of
+command([Filename]) when is_atom(Filename) ->
+    case file(atom_to_list(Filename)) of
 	{ok,List} ->
 	    io:format("~p\n", [List]),
 	    halt(0);
 	_Err ->
 	    halt(1)
     end.
-%%
-%% Env constist of options passed to bic_cpp
-%% {define, Name, Value}
-%% {include, Path}
-%% {qinclude, Path}
-%%
 
 string(String) ->
     string(String, []).
+
+-spec string(String::string(), Env::cpp_options()) ->
+		    {ok, bic()} | {error, Reason::term()}.
 
 string(String, Env) ->
     Env1 = [{define,"__bic__", 1},
@@ -72,10 +77,13 @@ string(String, Env) ->
 file(File) ->
     file(File,[]).
 
-file(File,Env) ->
+-spec file(Filename::string(), Env::cpp_options()) ->
+		  {ok, bic()} | {error, Reason::term()}.
+
+file(Filename,Env) ->
     Env1 = [{define,"__bic__", 1},
 	    {define,"__bic_extension_bitfield__", 1} | Env],
-    case bic_cpp:open(File, Env1) of
+    case bic_cpp:open(Filename, Env1) of
 	{ok,Fd} ->
 	    bic_scan:init(),  %% setup some dictionay stuff
 	    bic_parse:init(), %% setup some dictionay stuff
@@ -91,10 +99,10 @@ file(File,Env) ->
 		{error,{Ln,Mod,Message}} when is_integer(Ln) ->
 		    io:format("Message: ~w\n", [Message]),
 		    io:format("~s:~w: ~s\n",
-			      [File,Ln,Mod:format_error(Message)]),
+			      [Filename,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
 		{ok,Forms} ->
-		    case bic_lint:forms(File,Forms) of
+		    case bic_lint:forms(Filename,Forms) of
 			{ok,_LintForms} ->
 			    {ok,Forms};
 			Err={error,_} ->
@@ -105,7 +113,7 @@ file(File,Env) ->
 	    Error
     end.
 
-maybe_dump_variables(Fd) ->
+maybe_dump_cpp_variables(Fd) ->
     io:format("Variable dump:\n"),
     lists:foreach(
       fun({Name,[{string,_,Value}]}) ->
