@@ -11,7 +11,7 @@ Use simply like
 
 will return declarations found in the C file
 
-    -include:lib("bic/include/bic.hrl")
+    -include_lib("bic/include/bic.hrl")
 	
 contains the record definitions needed to handle
 the returned value.
