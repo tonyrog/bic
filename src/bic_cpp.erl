@@ -20,7 +20,7 @@
 -define(is_alpha(C),
 	(C >= $a andalso C =< $z) orelse 
 	(C >= $A andalso C =< $Z) orelse
-	(C == $_)).
+	(C =:= $_)).
 
 -define(is_identifier(C),
 	(C >= $0 andalso C =< $9) orelse
@@ -40,7 +40,7 @@
 -define(is_dec_digit(C), 
 	((C >= $0) andalso (C =< $9))).
 
--define(is_blank(C), ((C == $\s) orelse (C == $\t))).
+-define(is_blank(C), ((C =:= $\s) orelse (C =:= $\t))).
 
 -define(FALSE, 0).
 -define(TRUE,  1).
@@ -341,7 +341,7 @@ terminate(_Reason, S) ->
 		    ?dbg("TERMINATE-CLOSE-SAVED: ~s\n", [Save#save.file]),
 		    file:close(Save#save.fd)
 	    end, S#s.inc_stack),
-    if S#s.fd == undefined ->
+    if S#s.fd =:= undefined ->
 	    ok;
        true ->
 	    ?dbg("TERMINATE-CLOSE: ~s\n", [S#s.file]),
@@ -426,16 +426,16 @@ read_2(S, Data) when is_list(Data) ->
 	?TRUE ->
 	    emit_line(S, Data)
     end;
-read_2(S, {D,Bool}) when D=='#if'; D=='#ifdef'; D=='#ifndef'-> 
+read_2(S, {D,Bool}) when D=:='#if'; D=:='#ifdef'; D=:='#ifndef'-> 
     case peek_if(S) of
 	{_Tag,V,_Ln} ->
-	    if V == ?FALSE ->
+	    if V =:= ?FALSE ->
 		    S1 = push_if(S,D,?SKIP),
 		    read_1(S1);
-	       V == ?TRUE ->
+	       V =:= ?TRUE ->
 		    S1 = push_if(S,D,Bool),
 		    read_1(S1);
-	       V == ?SKIP ->
+	       V =:= ?SKIP ->
 		    S1 = push_if(S,D,?SKIP),
 		    read_1(S1)
 	    end;
@@ -1174,7 +1174,7 @@ parse_macro_arg(_) ->
 check_macro_args(Ns,Ts) ->
     N1 = length(Ns),
     N2 = length(lists:usort(Ns)),
-    if N1 == N2 ->
+    if N1 =:= N2 ->
 	    {ok,Ns,Ts};
        true ->
 	    {error, "duplicate macro parameter \"FIXME\""}
@@ -1338,7 +1338,7 @@ define_macro(S, Name, Ts) ->
 
 define(S,Var,Value) ->
     ?dbg("Define: ~s = ~p\n", [Var, Value]),
-    if  Var == "__INCLUDE_LEVEL__" ->
+    if  Var =:= "__INCLUDE_LEVEL__" ->
 	    warning(S, "can not redefine ~s", [Var]),
 	    S;
 	true ->
@@ -1352,11 +1352,11 @@ define(S,Var,Value) ->
 
 %% macro operations
 undef(S, Var) ->
-    if  Var == "__INCLUDE_LEVEL__" ->
+    if  Var =:= "__INCLUDE_LEVEL__" ->
 	    warning(S, "can not undefine ~s", [Var]),
 	    S;
-	Var == "__LINE__";
-	Var == "__FILE__" ->
+	Var =:= "__LINE__";
+	Var =:= "__FILE__" ->
 	    warning(S, "undefining ~s", [Var]),
 	    D = dict:store(Var, ?UNDEF, S#s.defs),
 	    S#s { defs = D };

@@ -185,23 +185,26 @@ constant -> flonum : flo('$1').
 constant -> chrnum : chr('$1').
 
 declaration -> declaration_specifiers ';' : 
-		 [#bic_decl { type='$1'}].
+		   {Storage,TypeSpec} = '$1',
+	       [#bic_decl { line=line('$2'), storage=Storage, type=TypeSpec}].
 declaration -> declaration_specifiers init_declarator_list ';' :
+		   {Storage,TypeSpec} = '$1',
 	       map(fun(D) when is_record(D,bic_decl) ->
-			   D#bic_decl { type='$1'++D#bic_decl.type };
+			   D#bic_decl { storage=Storage,
+					type=set_type(D#bic_decl.type,TypeSpec)};
 		      (T) when is_record(T,bic_typedef) ->
-			   Type = ('$1'--[typedef]) ++ T#bic_typedef.type,
-			   T#bic_typedef { type=Type }
+			   Type = set_type(T#bic_typedef.type,TypeSpec),
+			   T#bic_typedef { storage=Storage, type=Type }
 		   end, '$2').
 
 declaration_specifiers -> storage_class_specifier : 
-		['$1'].
-declaration_specifiers -> storage_class_specifier declaration_specifiers :
-		['$1' | '$2'].
+			      {'$1', undefined}.
+declaration_specifiers -> storage_class_specifier declaration_specifiers : 
+			      {_,Type} = '$2', {'$1',Type}.
 declaration_specifiers -> type_specifier : 
-		['$1'].
-declaration_specifiers -> type_specifier declaration_specifiers :
-		['$1'|'$2'].
+			      {undefined, '$1'}.
+declaration_specifiers -> type_specifier declaration_specifiers : 
+			      {Storage,Type} = '$2', {Storage,merge_typespec('$1',Type)}.
 
 init_declarator_list -> init_declarator : 
 		['$1'].
@@ -219,25 +222,23 @@ init_declarator -> declarator '=' initializer :
 init_declarator -> declarator ':' constant_expr '=' initializer : 
 		decl('$1'#bic_decl { size = '$3', value = '$5'}).
 
-
 storage_class_specifier -> 'extern'   : op('$1').
 storage_class_specifier -> 'static'   : op('$1').
 storage_class_specifier -> 'auto'     : op('$1').
-storage_class_specifier -> 'register' : op('$1').
-storage_class_specifier -> 'typedef'  : put(bic_is_typedef, true), op('$1').
+storage_class_specifier -> 'register' : op('$1'). 
+storage_class_specifier -> 'typedef'  : put(bic_is_typedef, true), undefined.
 
-
-type_specifier -> 'char' : op('$1').
-type_specifier -> 'short' : op('$1').
-type_specifier -> 'int' : op('$1').
-type_specifier -> 'long' : op('$1').
-type_specifier -> 'signed' : op('$1').
-type_specifier -> 'unsigned' : op('$1').
-type_specifier -> 'float' : op('$1').
-type_specifier -> 'double' : op('$1').
-type_specifier -> 'const' : op('$1').
-type_specifier -> 'volatile' : op('$1').
-type_specifier -> 'void' : op('$1').
+type_specifier -> 'void'     : #bic_type{line=line('$1'),type=void}.
+type_specifier -> 'char'     : #bic_type{line=line('$1'),type=char}.
+type_specifier -> 'int'      : #bic_type{line=line('$1'),type=int}.
+type_specifier -> 'float'    : #bic_type{line=line('$1'),type=float}.
+type_specifier -> 'double'   : #bic_type{line=line('$1'),type=double}.
+type_specifier -> 'short'    : #bic_type{line=line('$1'),size=short}.
+type_specifier -> 'long'     : #bic_type{line=line('$1'),size=long}.
+type_specifier -> 'signed'   : #bic_type{line=line('$1'),sign=signed}.
+type_specifier -> 'unsigned' : #bic_type{line=line('$1'),sign=unsigned}.
+type_specifier -> 'const'    : #bic_type{line=line('$1'),const=true}.
+type_specifier -> 'volatile' : #bic_type{line=line('$1'),volatile=true}.
 type_specifier -> struct_or_union_specifier : '$1'.
 type_specifier -> enum_specifier : '$1'.
 type_specifier -> type : typeid('$1').
@@ -268,8 +269,10 @@ struct_declaration_list -> struct_declaration_list struct_declaration :
 			'$1'++'$2'.
 
 struct_declaration -> type_specifier_list struct_declarator_list ';' :
-		 map(fun(D) -> D#bic_decl { type='$1'++D#bic_decl.type} end,
-		     '$2').
+			  map(fun(D) ->
+				      T = set_type(D#bic_decl.type,'$1'),
+				      D#bic_decl { type=T } 
+			      end, '$2').
 
 struct_declarator_list -> struct_declarator : ['$1'].
 struct_declarator_list -> struct_declarator_list ',' struct_declarator :
@@ -297,30 +300,30 @@ enumerator -> identifier '=' constant_expr : {arg('$1'),line('$1'),'$3'}.
 
 declarator -> declarator2 : '$1'.
 declarator -> pointer declarator2 : 
-		  '$2'#bic_decl { type=add_decl('$1','$2'#bic_decl.type) }.
+		  '$2'#bic_decl { type=set_type('$1','$2'#bic_decl.type) }.
 
 declarator2 -> identifier : 
 		   #bic_decl { line=line('$1'), name=arg('$1') }.
 declarator2 -> '(' declarator ')' : 
 		   '$2'.
 declarator2 -> declarator2 '[' ']' : 
-           '$1'#bic_decl { type=[{array,[]}|'$1'#bic_decl.type]}.
+		   '$1'#bic_decl { type=#bic_array{line=line('$2'),type='$1'#bic_decl.type,dim=[]}}.
 declarator2 -> declarator2 '[' constant_expr ']' : 
-           '$1'#bic_decl { type=[{array,'$3'}|'$1'#bic_decl.type]}.
+		   '$1'#bic_decl { type=set_type('$1'#bic_decl.type,#bic_array{line=line('$2'),dim='$3'}) }.
 declarator2 -> declarator2 '(' ')' : 
-           '$1'#bic_decl { type=[{fn,[]}|'$1'#bic_decl.type]}.
+		   '$1'#bic_decl { type=#bic_fn{line=line('$2'),type='$1'#bic_decl.type,params=[]}}.
 declarator2 -> declarator2 '(' parameter_type_list ')' :
-           '$1'#bic_decl { type=[{fn,'$3'}|'$1'#bic_decl.type]}.
+		   '$1'#bic_decl { type=set_type('$1'#bic_decl.type,#bic_fn{line=line('$2'),params='$3'}) }.
 declarator2 -> declarator2 '(' parameter_identifier_list ')' :
-           '$1'#bic_decl { type=[{fn,'$3'}|'$1'#bic_decl.type]}.
+		   '$1'#bic_decl { type=#bic_fn{line=line('$2'),type='$1'#bic_decl.type,params='$3'}}.
 
-pointer -> '*' : [{pointer,['*'],[]}].
-pointer -> '*' type_specifier_list : [{pointer,['*'],'$2'}].
-pointer -> '*' pointer : add_pointer('$2').
-pointer -> '*' type_specifier_list pointer : [{pointer,['*'],'$2'++['$3']}].
+pointer -> '*' : #bic_pointer{line=line('$1')}.
+pointer -> '*' type_specifier_list : #bic_pointer{line=line('$1'),type='$2'}.
+pointer -> '*' pointer : #bic_pointer{line=line('$1'),type='$2'}.
+pointer -> '*' type_specifier_list pointer : #bic_pointer{line=line('$1'),type=set_type('$2','$3')}.
 
-type_specifier_list -> type_specifier : ['$1'].
-type_specifier_list -> type_specifier_list type_specifier : '$1'++['$2'].
+type_specifier_list -> type_specifier : '$1'.
+type_specifier_list -> type_specifier_list type_specifier : merge_typespec('$1','$2').
 
 parameter_identifier_list -> identifier_list : '$1'.
 parameter_identifier_list -> identifier_list ',' '...' : '$1'++['$3'].
@@ -335,35 +338,35 @@ parameter_list -> parameter_declaration : ['$1'].
 parameter_list -> parameter_list ',' parameter_declaration : '$1'++['$3'].
 
 parameter_declaration -> type_specifier_list declarator :
-		'$2'#bic_decl { type='$1'++'$2'#bic_decl.type}.
+	       '$2'#bic_decl { type=set_type('$2'#bic_decl.type,'$1')}.
 parameter_declaration -> type_name : 
-		#bic_decl { type='$1'}.
+		#bic_decl { type='$1'}. %% FIXME: line number
 
 type_name -> type_specifier_list : '$1'.
-type_name -> type_specifier_list abstract_declarator : '$1'++'$2'.
+type_name -> type_specifier_list abstract_declarator : set_type('$2','$1').
 
 abstract_declarator -> pointer : '$1'.
 abstract_declarator -> abstract_declarator2 : '$1'.
-abstract_declarator -> pointer abstract_declarator2 : add_decl('$1','$2').
+abstract_declarator -> pointer abstract_declarator2 : set_type('$2','$1').
 
 abstract_declarator2 -> '(' abstract_declarator ')' : 
-		     '$2'.
+			    '$2'.
 abstract_declarator2 -> '[' ']' :
-		     [{array,[]}].
+			    #bic_array{line=line('$1'),dim=[]}.
 abstract_declarator2 -> '[' constant_expr ']' : 
-		     [{array,'$2'}].
+			    #bic_array{line=line('$1'),dim='$2'}.
 abstract_declarator2 -> abstract_declarator2 '[' ']' : 
-		     '$1'++[{array,[]}].
+			    set_type(#bic_array{line=line('$2'),dim=[]}, '$1').
 abstract_declarator2 -> abstract_declarator2 '[' constant_expr ']' : 
-		     '$1'++[{array,'$3'}].
+			    set_type('$1',#bic_array{line=line('$2'),dim='$3'}).
 abstract_declarator2 -> '(' ')' : 
-		     [{params,[]}].
+			    #bic_fn{line=line('$1'),params=[]}.
 abstract_declarator2 -> '(' parameter_type_list ')' : 
-		     [{params,'$2'}].
+			    #bic_fn{line=line('$1'),params='$2'}.
 abstract_declarator2 -> abstract_declarator2 '(' ')' : 
-		     '$1'++[{params,[]}].
+			    #bic_fn{line=line('$2'),type='$1',params=[]}.
 abstract_declarator2 -> abstract_declarator2 '(' parameter_type_list ')' :
-		     '$1'++[{params,'$3'}].
+			    #bic_fn{line=line('$2'),type='$1',params='$3'}.
 
 initializer -> assignment_expr : '$1'.
 initializer -> '{' initializer_list '}' : '$2'.
@@ -446,21 +449,28 @@ external_definition -> function_definition : ['$1'].
 external_definition -> declaration : '$1'.
 
 function_definition -> declarator function_body : 
-		   {OldDecl,Body} = '$2',
-		    #bic_function { line='$1'#bic_decl.line,
-				  name='$1'#bic_decl.name,
-				  type='$1'#bic_decl.type,
-				  params=OldDecl,
-				  body=Body}.
+			   {OldDecl,Body} = '$2',
+		       #bic_fn{type=undefined,params=_Params} = '$1'#bic_decl.type,
+		       #bic_function { line='$1'#bic_decl.line,
+				       name='$1'#bic_decl.name,
+				       type=[int],
+				       params=OldDecl,
+				       body=Body }.
 function_definition -> declaration_specifiers declarator function_body :
-		   {OldDecl,Body} = '$3',
-		    #bic_function { line='$2'#bic_decl.line,
-				  name='$2'#bic_decl.name,
-				  storage='$1',
-				  type='$2'#bic_decl.type,
-				  params=OldDecl,
-				  body=Body}.
-
+			   {OldDecl,Body} = '$3',
+		       {Storage,TypeSpec} = '$1',
+		       #bic_fn{type=Return,params=Params} =
+			   set_type('$2'#bic_decl.type,TypeSpec),
+		       ReturnType = if Return =:= undefined -> [int];
+				       true -> Return
+				    end,
+		       FnParams = select_params(OldDecl, Params),
+		       #bic_function { line='$2'#bic_decl.line,
+				       name='$2'#bic_decl.name,
+				       storage=Storage,
+				       type=ReturnType,
+				       params=FnParams,
+				       body=Body }.
 
 function_body -> compound_statement : {[],'$1'}.
 function_body -> declaration_list compound_statement : {'$1','$2'}.
@@ -480,11 +490,64 @@ init() ->
 	  (_) -> ok
       end, get()).
 
-add_pointer([{pointer,Ptr,Spec}]) ->
-    [{pointer,['*'|Ptr],Spec}].
+set_type(T1,T2) ->
+    %% io:format("set_type: (( ~s ))  (( ~s )) => ",
+    %%  [bic:format_type(T1),bic:format_type(T2)]),
+    R = set_type_(T1,T2),
+    %% io:format("~s\n", [bic:format_type(R)]),
+    R.
+    
 
-add_decl([{pointer,Ptr,Spec}], Decl) ->
-    [{pointer,Ptr,Spec++Decl}].
+%% set_type({pointer,T1}, {fn,T2,Ps}) -> {fn,{pointer,set_type(T1,T2)},Ps};
+set_type_(A=#bic_pointer{type=T1}, B=#bic_fn{type=T2}) ->
+    A#bic_pointer{type=B#bic_fn{type=set_type_(T1,T2)}};
+set_type_(A=#bic_pointer{type=T1}, B=#bic_array{type=T2}) -> 
+    B#bic_array{type=A#bic_pointer{type=set_type_(T1,T2)}};
+set_type_(A=#bic_pointer{type=T1}, T2) ->
+    A#bic_pointer{type=set_type_(T1,T2)};
+set_type_(A=#bic_array{type=T1}, T2) ->
+    A#bic_array{type=set_type_(T1,T2)};
+set_type_(A=#bic_fn{type=T1},T2) ->
+    A#bic_fn{type=set_type_(T1,T2)};
+set_type_(#bic_type{const=true},T2=#bic_pointer{}) ->
+    T2#bic_pointer{const=true};
+set_type_(undefined,T2) -> T2;
+set_type_(T1,undefined) -> T1;
+set_type_(T1=#bic_type{},T2=#bic_type{}) ->
+    merge_typespec_(T1,T2).
+
+
+select_params([], NewParams) ->
+    NewParams;
+select_params(OldDecl, _NewParams) ->
+    OldDecl.
+
+%% set non undefined elements from T1 to T2
+merge_typespec(T1, T2) when is_record(T1, bic_type), is_record(T2, bic_type) ->
+    merge_typespec_(T1,T2);
+merge_typespec(T1, undefined) ->
+    T1;
+merge_typespec(undefined, T2) ->
+    T2;
+merge_typespec(T1=#bic_type{type=undefined}, Type) ->
+    T1#bic_type{type=Type}.
+
+
+merge_typespec_(T1,T2) when  is_record(T1, bic_type), is_record(T2, bic_type) ->
+    T2#bic_type { sign     = defined(T1#bic_type.sign, T2#bic_type.sign),
+		  const    = defined(T1#bic_type.const, T2#bic_type.const),
+		  volatile = defined(T1#bic_type.volatile, T2#bic_type.volatile),
+		  size     = defined(T1#bic_type.size, T2#bic_type.size),
+		  type     = defined(T1#bic_type.type, T2#bic_type.type) }.
+
+defined(undefined, V) -> V;
+defined(V, undefined) -> V;
+defined(long, long) ->  long_long;
+defined(V, V) ->  V;
+defined(V, _W) ->
+    %% FIXME: actually a lint! error...
+    io:format("error: merge values ~p and ~p\n", [V, _W]),
+    V.
 
 id({identifier,Line,Name}) ->
     #bic_id { line=Line, name=Name}.

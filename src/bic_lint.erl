@@ -44,14 +44,6 @@
 	  elems  = [] :: [{string(),integer()}]       %% value
 	}).
 
--record(cfun,
-	{
-	  line,
-	  name = undefined :: undefined | string(), %% optional name
-	  return,
-	  args
-	}).
-
 -record(cfunction,
 	{
 	  line,
@@ -77,47 +69,46 @@
 
 -record(ctype,
 	{
-	  line       = 0 :: integer(), %% where type was first defined!
-	  sign       = default :: default | void | signed | unsigned,
-	  const      = default :: default | boolean(),
-	  volatile   = default :: default | boolean(),
-	  storage    = default :: default |  auto | static | register | extern,
-	  size       = default :: default | none | short | long | long_long,
-	  type       = default :: default | char | int | float | double |
-				  #cstruct{} | #cunion{},
-	  pointer    = [] :: ['*'],
-	  dimension  = [] :: [ dynamic | integer() | cexpr() ]
+	 line       = 0 :: integer(), %% where type was first defined!
+	 sign       = default :: default | signed | unsigned,
+	 const      = default :: default | boolean(),
+	 volatile   = default :: default | boolean(),
+	 size       = default :: default | none | short | long | long_long,
+	 type       = default :: default | void | char | int | float | double
 	}).
 
 -record(cdecl,
        {
-	 line,
-	 name = undefined :: undefined | string(),
-	 type = undefined :: undefined | #ctype{},
-	 size = undefined :: undefined | integer(),
-	 value = undefined :: undefined | cexpr()
+	line,
+	name = undefined :: undefined | string(),
+	type = undefined :: undefined | #ctype{},
+	size = undefined :: undefined | integer(),
+	value = undefined :: undefined | cexpr()
        }).
 
 -record(ctypedef,
-       {
+	{
 	 line,
 	 name = undefined :: undefined | string(),
 	 type = undefined :: undefined | #ctype{},
 	 size = undefined :: undefined | integer(),
 	 value = undefined :: undefined | cexpr()
-       }).
+	}).
 
 -type scopetype() :: compound | for | while | do | switch.
 
+-type typemap() :: #{ string() => #ctypedef{}}.
+-type declmap() :: #{ string() => #cdecl{}}.
+
 -record(scope,
 	{
-	  filename = "" :: string(),  %% filename 
-	  type     = [] :: [scopetype()],
-	  typedefs = [] :: [dict:dict()], %% stack of dictionary
-	  decls    = [] :: [dict:dict()], %% stack of declared data
-	  labels   = [] :: [string()],
-	  errors   = [],
-	  warnings = []
+	 filename = "" :: string(),  %% filename 
+	 type     = [] :: [scopetype()],
+	 typedefs = [] :: [typemap()], %% stack of typedefs
+	 decls    = [] :: [declmap()], %% stack of declarations
+	 labels   = [] :: [string()],
+	 errors   = [],
+	 warnings = []
 	}).
 
 forms(Filename,Forms) ->
@@ -160,10 +151,10 @@ forms_([F=#bic_enum{}|Fs], Acc, S0) ->
     {CEnum, S1} = enum(F, S0),
     forms_(Fs, [CEnum|Acc], S1);
 forms_([F=#bic_function {line=Ln,name=Name} | Fs], Acc, S0) ->
-    {CType,S1} = type(F#bic_function.storage,Ln,S0),
-    [{fn,Args}] = F#bic_function.type,
+    %% io:format("return = ~p\n", [F#bic_function.type]),
+    {CType,S1} = type(F#bic_function.type,Ln,S0),
     S2 = push_scope(S1),
-    {CArgs,S3} = decls(Args, S2),
+    {CArgs,S3} = decls(F#bic_function.params, S2),
 
     %% declare for recursive functions
     Func0 = #cfunction { line=Ln, name=Name, return = CType,
@@ -279,7 +270,6 @@ statement_list([Stmt|StmtList], Acc, S0) ->
 statement_list([], Acc, S0) ->
     {lists:reverse(Acc), S0}.
 
-
 report(Filename,Reports) ->
     [ begin io:format("~s:~w: "++Fmt++"\n", 
 		      [Filename,Line|Args]) end || {Line,Fmt,Args} <- Reports ],
@@ -320,7 +310,6 @@ decls([], S0) ->
 decls(undefined, S0) ->
     {undefined, S0}.
 	  
-
 struct(X=#bic_struct{line=Ln},S0) ->
     {Elems,S00} = decls(X#bic_struct.elems, push_scope(S0)),
     S1 = pop_scope(S00),
@@ -396,7 +385,6 @@ store_enumerators([{ID,Ln,Value}|Elems], S0) ->
 store_enumerators([], S0) ->
     S0.
 
-
 enums(Elems, S0) ->
     enums(Elems, [], S0).
 
@@ -429,59 +417,44 @@ enumerate([], Acc, _I) ->
 type(undefined,Ln,S) ->
     {#ctype{line=Ln}, S};
 type(T,Ln,S) ->
-    type_(T, #ctype{line=Ln}, S).
+    type_(T,Ln,S).
 
-type_([X|Xs], T, S) ->
-    case X of
-	char     -> set_basic_type(char, T, Xs, S);
-	int      -> set_basic_type(int, T, Xs, S);
-	float    -> set_basic_type(float, T, Xs, S);
-	double   -> set_basic_type(double, T, Xs, S);
-	void     -> set_basic_type(void, T, Xs, S);
-	signed   -> set_basic_sign(signed, T, Xs, S);
-	unsigned -> set_basic_sign(unsigned, T, Xs, S);
-	short    -> set_basic_size(short, T, Xs, S);
-	long     -> set_basic_size(long, T, Xs, S);
-	auto     -> set_basic_storage(auto, T, Xs, S);
-	static   -> set_basic_storage(static, T, Xs, S);
-	register -> set_basic_storage(register, T, Xs, S);
-	extern   -> set_basic_storage(extern, T, Xs, S);
-	const    -> type_(Xs, T#ctype {const=true}, S);
-	volatile -> type_(Xs, T#ctype {volatile=true}, S);
-	{array,Dim} -> add_dimension(Dim, T, Xs, S);
-	[{pointer,Ptr,Ys}] ->
-	    {T1,S1} = type_(Ys, #ctype{line=T#ctype.line}, S),
-	    type_(Xs,T#ctype { pointer=Ptr, type=T1 },S1);
-	{pointer,Ptr,Ys} ->
-	    {T1,S1} = type_(Ys, #ctype{line=T#ctype.line}, S),
-	    type_(Xs,T#ctype { pointer=Ptr, type=T1 },S1);
-	{fn,Args} -> 
-	    {CArgs,S1} = decls(Args, push_scope(S)),
-	    CFun = #cfun { return = T#ctype.type,
-			   args   = CArgs },
-	    type_(Xs, T#ctype { type=CFun }, pop_scope(S1));
-	#bic_typeid { line=Ln,name=Name} ->
-	    case find_type(Name, S) of
-		error ->
-		    S1 = add_error(S,Ln,"type '~s' not found", [Name]),
-		    type_(Xs, T#ctype { type=int }, S1);
-		{ok,Typedef} ->
-		    %% fixme: check interaction between T and T1
-		    T1 = Typedef#ctypedef.type,
-		    type_(Xs, T1, S)
-	    end;
-	#bic_enum{}  ->
-	    {CEnum,S1} = enum(X, S),
-	    type_(Xs, T#ctype { type=CEnum }, S1);
-	#bic_struct{} -> 
-	    {CStruct,S1} = struct(X, S),
-	    type_(Xs, T#ctype { type=CStruct }, S1);
-	#bic_union{}  ->
-	    {CUnion,S1} = union(X, S),
-	    type_(Xs, T#ctype { type=CUnion }, S1)
+type_(#bic_pointer{type=T},Ln,S) -> 
+    {T1,S1} = type_(T,Ln,S),
+    {{pointer,T1},S1};
+type_(#bic_array{type=T,dim=D},Ln,S) ->
+    {T1,S1} = type_(T,Ln,S),
+    {{array,T1,D},S1};
+type_(#bic_fn{type=T,params=Ps},Ln,S) -> 
+    {T1,S1} = type_(T,Ln,S),
+    S2 = push_scope(S1),
+    {Ps1,S3} = decls(Ps,S2),
+    S4 = pop_scope(S3),
+    {{fn,T1,Ps1},S4};
+
+type_(#bic_typeid { line=Ln,name=Name},_Ln,S) ->
+    case find_type(Name, S) of
+	error ->
+	    S1 = add_error(S,Ln,"type '~s' not found", [Name]),
+	    {#ctype { type=int }, S1};
+	{ok,Typedef} ->
+	    %% fixme: check interaction between T and T1
+	    {Typedef#ctypedef.type,S}
     end;
-type_([],T,S) ->
-    {T,S}.
+type_(X=#bic_enum{},_Ln,S)  ->
+    enum(X, S);
+type_(X=#bic_struct{},_Ln,S) -> 
+    struct(X, S);
+type_(X=#bic_union{},_Ln,S) ->
+    union(X, S);
+type_(X=#bic_type{},Ln,S) ->
+    %% FIXME: check combinations!
+    {#ctype{line=Ln,
+	    sign=X#bic_type.sign,
+	    const=X#bic_type.const,
+	    volatile=X#bic_type.volatile,
+	    size=X#bic_type.size,
+	    type=X#bic_type.type}, S}.
 
 expr(undefined, S0) ->
     {undefined, S0};
@@ -493,6 +466,7 @@ expr(#bic_id { line=Ln, name=Name }, S0) ->
 	    S1 = add_error(S0,Ln,"identifier '~s' not declared", [Name]),
 	    { #cvar { line=Ln, id=Name, type=#ctype { type=int } }, S1 };
 	{ok,CDecl} ->
+	    %% io:format("decl of ~s = ~p\n", [Name, CDecl]),
 	    CVar = #cvar { line=Ln, id=Name, type=CDecl#cdecl.type },
 	    {CVar, S0}
     end;
@@ -531,71 +505,113 @@ expr([X | Xs], S0) ->
 expr([], S0) ->
     {[], S0}.
 
+is_compare_op('<') -> true;
+is_compare_op('<=') -> true;
+is_compare_op('>') -> true;
+is_compare_op('>=') -> true;
+is_compare_op('==') -> true;
+is_compare_op('!=') -> true;
+is_compare_op(_) -> false.
 
-is_integer_op('~') -> true;
-is_integer_op('!') -> true;
-is_integer_op('%') -> true;
-is_integer_op('^') -> true;
-is_integer_op('&') -> true;
-is_integer_op('&&') -> true;
-is_integer_op('|') -> true;
-is_integer_op('||') -> true;
-is_integer_op('>>') -> true;
-is_integer_op('<<') -> true;
-is_integer_op(_) -> false.
+is_logical_op('&&') -> true;
+is_logical_op('||') -> true;
+is_logical_op('!') -> true;
+is_logical_op(_) -> false.
+
+is_bitwise_op('&') -> true;
+is_bitwise_op('|') -> true;
+is_bitwise_op('^') -> true;
+is_bitwise_op('~') -> true;
+is_bitwise_op(_) -> false.
+
+is_shift_op('>>') -> true;
+is_shift_op('<<') -> true;
+is_shift_op(_) -> false.
+    
+is_integer_op('+') -> true;
+is_integer_op('-') -> true;
+is_integer_op('*') -> true; 
+is_integer_op('/') -> true; 
+is_integer_op('%') -> true; 
+is_integer_op(Op) ->
+    is_bitwise_op(Op) orelse
+	is_shift_op(Op) orelse
+	is_logical_op(Op) orelse
+	is_compare_op(Op).
+
+is_float_op('+') -> true;
+is_float_op('-') -> true;
+is_float_op('*') -> true;
+is_float_op('/') -> true;
+is_float_op(_) -> false.
+    
+is_pointer_op('+') -> true;
+is_pointer_op('-') -> true;
+is_pointer_op('++') -> true;
+is_pointer_op('--') -> true;
+is_pointer_op(Op) -> is_compare_op(Op).
 
 check_type(Ln, Op, T, S) ->
     if Op =:= '~'; Op =:= '!' ->
-	    case {T#ctype.type,T#ctype.pointer,T#ctype.dimension} of
-		{int,[],[]} ->  {T#ctype{line=Ln},S};
-		{char,[],[]} -> {T#ctype{line=Ln},S};
-	       _ ->
+	    case is_int_type(T) of
+		true -> {T#ctype{line=Ln}, S};
+		false ->
 		    %% coerce pointer to integer
 		    S1 = add_error(S,Ln,"operator ~s expect integer arguments",
 				   [Op]),
-		    {T#ctype{line=Ln,type=int}, S1}
+		    {#ctype{line=Ln,type=int}, S1}
 	    end;
        Op =:= '&' ->
-	    {T#ctype{line=Ln, pointer=['*'|T#ctype.pointer]}, S};
+	    {{pointer,T#ctype{line=Ln}}, S};
        Op =:= '*' ->
-	    case T#ctype.pointer of
-		[] -> 
-		    S1 = add_error(S,Ln,"argument is not a pointer typer",
+	    case T of
+		{pointer,Type} ->
+		    {Type, S};  %% fixme set line number of Type
+		_ ->
+		    S1 = add_error(S,Ln,"argument is not a pointer type",
 				   []),
-		    {T, S1};
-		['*'|Ptr] ->
-		    {T#ctype{line=Ln, pointer=Ptr}, S}
+		    {#ctype{line=Ln,type=int}, S1}
 	    end;
-       Op =:= '-'; Op =:= '+'; Op =:= '++'; Op =:= '--';
-       Op =:= '+++'; Op =:= '---' ->
-	    case {T#ctype.type,T#ctype.pointer,T#ctype.dimension} of	    
-		{int,[],[]} -> {T#ctype{line=Ln},S};
-		{char,[],[]} -> {T#ctype{line=Ln},S};
-		{float,[],[]} -> {T#ctype{line=Ln},S};
-		{double,[],[]} -> {T#ctype{line=Ln},S};
+       Op =:= '-'; Op =:= '+' ->
+	    case is_number_type(T) of
+		true ->
+		    {T#ctype{line=Ln},S};
 		_ ->
 		    S1 = add_error(S,Ln,"operator ~s expect scalar arguments",
 				   [Op]),
 		    {T#ctype{line=Ln}, S1}
 	    end;
+       Op =:= '++'; Op =:= '--'; Op =:= '+++'; Op =:= '---' ->
+	    case is_int_type(T) orelse is_pointer_type(T) of
+		true ->
+		    {T#ctype{line=Ln},S};
+		false ->
+		    S1 = add_error(S,Ln,"operator ~s expect scalar arguments",
+				   [Op]),
+		    {T#ctype{line=Ln}, S1}
+	    end;
        true ->
-	    S1 = add_error(S,Ln,"operator ~s not expected",
-			   [Op]),
+	    S1 = add_error(S,Ln,"operator ~s not expected",[Op]),
 	    {T#ctype{line=Ln}, S1}
     end.
 
 check_type(Ln, '[]', T1, T2, S) ->
-    case {T1#ctype.dimension,is_int_type(T2)} of
-	{[_|Ds],false} ->
+    %% io:format("check_type ~p ~w ~w\n", ['[]',T1,T2]),
+    case is_int_type(T2) of
+	false ->
 	    S1 = add_error(S,Ln,"index expression is not integer type",[]),
-	    {T1#ctype { dimension=Ds }, S1};
-	{[],_} ->
-	    S1 = add_error(S,Ln,"subscript is not an array",[]),
-	    {T1, S1};
-	{[_|Ds],true} ->
-	    {T1#ctype { dimension=Ds }, S}
+	    {base_type(T1), S1};
+	true ->
+	    case is_address_type(T1) of
+		true ->
+		    {base_type(T1), S};
+		false ->
+		    S1 = add_error(S,Ln,"subscript is not an array",[]),
+		    {#ctype{line=Ln,type=int}, S1}
+	    end
     end;
 check_type(Ln, '+', T1, T2, S) ->
+    %% io:format("check_type ~p ~w ~w\n", ['+',T1,T2]),
     case is_number_type(T1) andalso is_number_type(T2) of
 	true ->
 	    {coerce(T1,T2), S};
@@ -612,44 +628,39 @@ check_type(Ln, '+', T1, T2, S) ->
 	    end
     end;
 check_type(_Ln, _Op, T1, _T2, S) ->
+    %% io:format("check_type ~p ~w ~w\n", [_Op,T1,_T2]),
     {T1, S}.
 
 coerce(T1,_T2) ->
     T1.
 
-
 check_assign(_Ln, _Op, Lhs, _Rhs, S0) ->
     {Lhs, S0}.
 
-is_int_type(T) ->
-    is_base_type(T) andalso
-	case T#ctype.type of
-	    char -> true;
-	    int -> true;
-	    _ -> false
-	end.
+is_int_type(Ct=#ctype{}) ->
+    case Ct#ctype.type of
+	char -> true;
+	int -> true;
+	_ -> false
+    end;
+is_int_type(#cenum{}) -> true;
+is_int_type(_) -> false.
 
-is_number_type(T) ->
-    is_base_type(T) andalso
-	case T#ctype.type of
-	    char -> true;
-	    int -> true;
-	    float -> true;
-	    double -> true;
-	    _ -> false
-	end.
+is_number_type(#ctype{}) -> true;
+is_number_type(#cenum{}) -> true;
+is_number_type(_) -> false.
 
-is_base_type(T) ->
-    (not is_pointer_type(T)) andalso (not is_array_type(T)).
+base_type({pointer,Type}) -> Type;
+base_type({array,Type,_Dim}) -> Type.
 
+is_address_type(Type) ->
+    is_array_type(Type) orelse is_pointer_type(Type).
 
-is_array_type(T) ->
-    not (T#ctype.dimension =:=  []).
+is_array_type({array,_,_}) -> true;
+is_array_type(_) -> false.
 
-is_pointer_type(T) ->
-    not (T#ctype.pointer =:= []).
-
-	    
+is_pointer_type({pointer,_}) -> true;
+is_pointer_type(_) -> false.
 
 typeof(#cconst  {type=Type}) -> Type;
 typeof(#cvar    {type=Type}) -> Type;
@@ -681,7 +692,7 @@ constant(#bic_constant { line=Ln, base=char, value=[$',Val,$'] },S0) ->
     {Const, S0};
 constant(#bic_constant { line=Ln, base=string, value=Val },S0) ->
     Const = #cconst { line=Ln, value=Val,
-		      type=#ctype { const=true,type=char,dimension=[dynamic]}},
+		      type={array,#ctype{const=true,type=char},[]} },
     {Const, S0};
 constant(#bic_constant { line=Ln, base=16, value=[$0,$x|Val] }, S0) ->
     Const = #cconst { line=Ln, value=list_to_integer(Val, 16),
@@ -691,105 +702,6 @@ constant(#bic_constant { line=Ln, base=B, value=Val },S0) when is_integer(B) ->
     Const = #cconst { line=Ln, value=list_to_integer(Val, B),
 		      type=#ctype { const=true, type=int }},
     {Const, S0}.
-
-%% only 
-add_dimension(C=#bic_constant { }, T, Xs, S) ->
-    {Dim, S1} = constant(C, S),
-    T1 = T#ctype { dimension = [Dim | T#ctype.dimension ] },
-    type_(Xs, T1, S1);
-add_dimension(Expr, T, Xs, S) ->
-    {CExpr,S1} = expr(Expr, S),
-    T1 = T#ctype { dimension = [CExpr |  T#ctype.dimension ] },
-    type_(Xs, T1, S1).
-
-
-set_basic_sign(Sign, T, Xs, S) ->
-    if T#ctype.sign =:= default ->
-	    type_(Xs, T#ctype { sign=Sign }, S);
-       T#ctype.sign =:= Sign ->
-	    S1 = add_error(S,T#ctype.line,"duplicate '~s'", [Sign]),
-	    type_(Xs, T, S1);
-       true ->
-	    S1 = add_error(S,T#ctype.line,
-			   "both '~s' and '~s' in declaration specifiers", 
-			   [Sign, T#ctype.sign]),
-	    type_(Xs, T, S1)
-    end.
-
-set_basic_storage(Storage, T, Xs, S) ->
-    if T#ctype.storage =:= default ->
-	    type_(Xs, T#ctype { storage=Storage }, S);
-       T#ctype.storage =:= Storage ->
-	    S1 = add_error(S,T#ctype.line,
-			   "duplicate '~s'", [Storage]),
-	    type_(Xs, T, S1);
-       true ->
-	    S1 = add_error(S,T#ctype.line,
-			   "both '~s' and '~s' in declaration specifiers", 
-			   [Storage, T#ctype.storage]),
-	    type_(Xs, T, S1)
-    end.
-	    
-set_basic_size(Size, T, Xs, S) ->
-    if T#ctype.size =:= default ->
-	    type_(Xs, T#ctype { size=Size }, S);
-       Size =:= long, T#ctype.size =:= long ->
-	    type_(Xs, T#ctype { size=long_long }, S);
-       Size =:= T#ctype.size ->
-	    S1 = add_error(S,T#ctype.line,
-			   "duplicate '~s'", [Size]),
-	    type_(Xs, T, S1);
-       Size =/= T#ctype.size ->
-	    S1 = add_error(S,T#ctype.line,
-			   "both '~s' and '~s' in declaration specifiers", 
-			   [Size, T#ctype.size]),
-	    type_(Xs, T, S1)
-    end.
-
-set_basic_type(Basic, T, Xs, S) ->
-    if T#ctype.type =:= default, Basic =:= void ->
-	    if T#ctype.sign =/= default;
-	       T#ctype.size =/= default ->
-		    S1 = add_error(S,T#ctype.line,
-				   "void has no size nor sign", []),
-		    type_(Xs, T#ctype { type=Basic,
-					sign=default,
-					size=default }, S1);
-	       true ->
-		    type_(Xs, T#ctype { type=Basic }, S)
-	    end;
-       T#ctype.type =:= default ->
-	    if Basic =:= void ->
-		    if T#ctype.sign =/= default;
-		       T#ctype.size =/= default ->
-			    S1 = add_error(S,T#ctype.line,
-					   "void has no size nor sign", []),
-			    type_(Xs, T#ctype { type=Basic,
-						sign=default,
-						size=default }, S1);
-		       true ->
-			    type_(Xs, T#ctype { type=Basic }, S)
-		    end;
-	       Basic =:= float; Basic =:= double ->
-		    if T#ctype.sign =/= default;
-		       T#ctype.size =/= default ->
-			    S1 = add_error(S,T#ctype.line,
-					   "'~s' has fixed size and sign",
-					   [Basic]),
-			    type_(Xs, T#ctype { type=Basic }, S1);
-		       true ->
-			    type_(Xs, T#ctype { type=Basic }, S)
-		    end;
-	       true ->
-		    type_(Xs, T#ctype { type=Basic }, S)
-	    end;
-       true -> 
-	    S1 = add_error(S,T#ctype.line,
-			   "both '~s' and '~s' in declaraion specifiers",
-			   [Basic,T#ctype.type]),
-	    type_(Xs, T#ctype { type=Basic }, S1)
-    end.
-    
 
 add_warning(S, Ln, Fmt, Args) ->
     S#scope { warnings = [{Ln,Fmt,Args} | S#scope.warnings] }.
@@ -812,8 +724,8 @@ clear_labels(S) ->
 new_scope(Filename) ->
     #scope { 
        filename = Filename,
-       typedefs = [dict:new()],
-       decls    = [dict:new()]
+       typedefs = [#{}],
+       decls    = [#{}]
       }.
 
 push_scope(S) ->
@@ -822,8 +734,8 @@ push_scope(S) ->
 push_scope(S,Type) ->
     S#scope {
       type     = [Type | S#scope.type],
-      typedefs = [dict:new() | S#scope.typedefs],
-      decls    = [dict:new() | S#scope.decls]
+      typedefs = [#{} | S#scope.typedefs],
+      decls    = [#{} | S#scope.decls]
      }.
 
 pop_scope(S) ->
@@ -845,35 +757,33 @@ is_scope_type_(Types, [Type|Ts]) ->
 is_scope_type_(_Types, []) ->
     false.
 
-
 find_type(Name, S) ->
     find_in_dicts_(Name, S#scope.typedefs).
 
 find_local_type(Name, S) ->
-    dict:find(Name, hd(S#scope.typedefs)).
+    maps:find(Name, hd(S#scope.typedefs)).
 
 store_type(Name, Type, S) ->
-    %% io:format("store ~p = ~p\n", [Name, Type]),
     S#scope { typedefs = store_in_dicts_(Name, Type, S#scope.typedefs) }.
 
 find_decl(Name, S) ->
     find_in_dicts_(Name, S#scope.decls).
 
 find_local_decl(Name, S) ->
-    dict:find(Name, hd(S#scope.decls)).
+    maps:find(Name, hd(S#scope.decls)).
 
 store_decl(Name, Decl, S) ->
     %% io:format("store ~p = ~p\n", [Name, Decl]),
     S#scope { decls = store_in_dicts_(Name, Decl, S#scope.decls) }.
 
 erase_in_dicts_(Key, [D|Ds]) ->
-    [dict:erase(Key, D) | Ds].
+    [maps:remove(Key, D) | Ds].
 
 store_in_dicts_(Key, Value, [D|Ds]) ->
-    [dict:store(Key, Value, D) | Ds].
+    [maps:put(Key, Value, D) | Ds].
 
 find_in_dicts_(Key, [D|Ds]) ->
-    case dict:find(Key, D) of
+    case maps:find(Key, D) of
 	error -> find_in_dicts_(Key, Ds);
 	Res -> Res
     end;
