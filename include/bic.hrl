@@ -73,10 +73,11 @@
 	 const     :: boolean(),
 	 volatile  :: boolean(),
 	 size      :: bic_size(),
-	 type      :: undefined | void | char | int | float | double
-		      %% bic_typeid() | bic_struct() | bic_union()
+	 type      :: undefined | void | char | int | float | double |
+		      bic_struct() | bic_union() | bic_typeid() | bic_enum()
 	}).
--type bic_typespec() :: #bic_type{}.
+-type bic_typespec() :: #bic_type{} | bic_struct() | bic_union() |
+			bic_typeid() | bic_enum().
 
 -record(bic_enum,
 	{
@@ -90,7 +91,6 @@
 -record(bic_pointer,
 	{
 	 line      :: integer(),
-	 const     :: boolean(),   %% pointer is constant
 	 type      :: bic_type()
 	}).
 -type bic_pointer() :: #bic_pointer{}.
@@ -207,9 +207,9 @@
 	 line :: integer(),
 	 name :: string(),   %% name of type defined
 	 storage :: bic_storage(),
-	 type :: bic_type(), %% type spec
-	 size,               %% optional constant bit field size
-	 value               %%  init value (error if present)
+	 type :: bic_type(),    %% type spec
+	 size :: bic_expr(),    %% optional constant bit field size
+	 value :: bic_expr()    %% optional init value?
 	}).
 -type bic_typedef() :: #bic_typedef{}.
 
@@ -218,9 +218,9 @@
 	 line :: integer(),
 	 name :: string(),   %% name of type defined
 	 storage :: bic_storage(),
-	 type :: bic_type(), %% type spec
-	 size,               %% optional constant bit field size
-	 value               %%  init value (error if present)
+	 type :: bic_type(),  %% type spec
+	 size :: bic_expr(),  %% optional constant bit field size
+	 value :: bic_expr()  %% optional init value
 	}).
 -type bic_decl() :: #bic_decl{}.
 

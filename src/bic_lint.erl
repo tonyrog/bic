@@ -582,13 +582,18 @@ check_type(Ln, Op, T, S) ->
 		    {T#ctype{line=Ln}, S1}
 	    end;
        Op =:= '++'; Op =:= '--'; Op =:= '+++'; Op =:= '---' ->
-	    case is_int_type(T) orelse is_pointer_type(T) of
+	    case is_pointer_type(T) of
 		true ->
-		    {T#ctype{line=Ln},S};
+		    {T,S};
 		false ->
-		    S1 = add_error(S,Ln,"operator ~s expect scalar arguments",
-				   [Op]),
-		    {T#ctype{line=Ln}, S1}
+		    case is_int_type(T) of
+			true ->
+			    {T#ctype{line=Ln},S};
+			false ->
+			    S1 = add_error(S,Ln,"operator ~s expect scalar arguments",
+					   [Op]),
+			    {T#ctype{line=Ln}, S1}
+		    end
 	    end;
        true ->
 	    S1 = add_error(S,Ln,"operator ~s not expected",[Op]),
@@ -683,7 +688,7 @@ lineof(#cifexpr {line=Line}) -> Line.
 
 
 constant(#bic_constant { line=Ln, base=float, value=Val },S0) ->
-    Const = #cconst { line=Ln, value=list_to_float(Val),
+    Const = #cconst { line=Ln, value=bic:constant_to_float(Val),
 		      type=#ctype { const=true, type=double }},
     {Const, S0};
 constant(#bic_constant { line=Ln, base=char, value=[$',Val,$'] },S0) ->
@@ -695,11 +700,11 @@ constant(#bic_constant { line=Ln, base=string, value=Val },S0) ->
 		      type={array,#ctype{const=true,type=char},[]} },
     {Const, S0};
 constant(#bic_constant { line=Ln, base=16, value=[$0,$x|Val] }, S0) ->
-    Const = #cconst { line=Ln, value=list_to_integer(Val, 16),
+    Const = #cconst { line=Ln, value=bic:constant_to_integer(Val, 16),
 		      type=#ctype { const=true, type=int }},
     {Const, S0};
 constant(#bic_constant { line=Ln, base=B, value=Val },S0) when is_integer(B) ->
-    Const = #cconst { line=Ln, value=list_to_integer(Val, B),
+    Const = #cconst { line=Ln, value=bic:constant_to_integer(Val, B),
 		      type=#ctype { const=true, type=int }},
     {Const, S0}.
 
