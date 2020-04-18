@@ -240,7 +240,6 @@ combine_types_(T1, B=#bic_array{type=T2}) ->
 combine_types_(T1, B=#bic_fn{type=T2}) ->
     B#bic_fn{type=combine_types_(T1,T2)};
 
-
 combine_types_('_',T2) -> T2;
 combine_types_(T1,'_') -> T1;
 combine_types_(T1=#bic_type{},T2=#bic_type{}) ->
@@ -248,7 +247,12 @@ combine_types_(T1=#bic_type{},T2=#bic_type{}) ->
 		  const    = defined(T1#bic_type.const, T2#bic_type.const),
 		  volatile = defined(T1#bic_type.volatile, T2#bic_type.volatile),
 		  size     = defined(T1#bic_type.size, T2#bic_type.size),
-		  type     = defined(T1#bic_type.type, T2#bic_type.type) }.
+		  type     = defined(T1#bic_type.type, T2#bic_type.type) };
+combine_types_(T1=#bic_type{const=true,type=undefined},T2) ->
+    T1#bic_type{type=T2};
+combine_types_(A, #bic_type{type='_'}) -> A;
+combine_types_(#bic_type{type=undefined}, B) -> B.
+
 
 defined('_', V) -> V;
 defined(V, '_') -> V;
