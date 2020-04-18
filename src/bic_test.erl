@@ -67,14 +67,40 @@ type() ->
 	  fn(int(),[decl(array(array(int(),dim(3)),dim(2)))])},
 	 {"int* f(int)", fn(pointer(int()),[decl(int())])},
 	 
+	 %% const pointers
+	 {"const int* ptr", pointer(const(int()))},
+	 {"int * const ptr", const(pointer(int()))},
+	 
+	 {"const char* ptr", pointer(const(char())) },
+	 {"char* const ptr", const(pointer(char())) },
+	 {"const char* const ptr", const(pointer(const(char()))) },
+
+	 %% embeddede style declaration (volatile/register etc)
+	 {"volatile unsigned long vu32",
+	  #bic_type{?L,volatile=true,sign=unsigned,size=long}},
+	 {"volatile unsigned short vu16",
+	  #bic_type{?L,volatile=true,sign=unsigned,size=short}},
+	 {"volatile unsigned char vu8",
+	  #bic_type{?L,volatile=true,sign=unsigned,type=char}},
+	 {"register unsigned long r1", register,
+	  #bic_type{?L,sign=unsigned,size=long}},
+
 	 %% function pointers
+	 {"int* f(int)",   fn(pointer(int()),[decl(int())])},
 	 {"int (*f)(int)", pointer(fn(int(),[decl(int())]))},
 
-	 %% const pointers
-	 {"const int* ptr", pointer(const(int))},
 
-	 {"int * const ptr", const(pointer(int()))}
+	 {"int f(int (*)(int), char (*)(float))",
+	  fn(int(),[decl(pointer(fn(int(),[decl(int())]))),
+		    decl(pointer(fn(char(),[decl(float())])))])},
 
+	 %% FIXME: function pointer return int pointer
+	 %% int* (*x)(int);
+	 %% FIXME: pointer to function pointer return int pointer
+	 %% int* (**x)(int);
+
+
+	 {"void done", #bic_type{?L,type=void}} %% hmmm (handle in lint!)
 	],
     NFail = 
 	lists:sum(lists:map(
@@ -89,23 +115,25 @@ type() ->
 	    io:format("FAILED ~w cases\n", [NFail])
     end.
 
-
-int() -> type(int).
+int() -> #bic_type{?L,type=int}.
+char() -> #bic_type{?L,type=char}.
+float() -> #bic_type{?L,type=float}.
 type(T) -> #bic_type{?L,type=T}.
-const(T) -> #bic_type{?L,const=true,type=T}.
 pointer(T) -> #bic_pointer{?L,type=T}.
 array(T,D) -> #bic_array{?L,type=T,dim=D}.
-fn(T,Ps) -> #bic_fn{?L,type=T,params=Ps}.
-    
+fn(T,Ps)   -> #bic_fn{?L,type=T,params=Ps}.
+
+const(T) when is_atom(T) -> #bic_type{?L,const=true,type=T};
+const(T=#bic_type{})     -> T#bic_type{?L,const=true};
+const(T)                 -> #bic_type{?L,const=true,type=T}.
 
 dim(N) ->
-    #bic_constant{line=0,base=10, value=integer_to_list(N)}.
+    #bic_constant{?L,base=10, value=integer_to_list(N)}.
 
 decl(Name,Type) ->
-    #bic_decl{line=0,name=Name,type=Type}.
-
-decl(Type) -> %% paramter declaration without name has no linenumber yet!
-    #bic_decl{type=Type}.
+    #bic_decl{?L,name=Name,type=Type}.
+decl(Type) ->
+    #bic_decl{?L,type=Type}.
 
 match_type(String, Type) ->    
     match_type(String, undefined, Type).
@@ -117,7 +145,8 @@ match_type(String, Storage, Type) ->
 	    io:format("OK\n"),
 	    0;
 	{ok,[#bic_decl{ type=BadMatch}]} ->
-	    io:format("ERROR bad match ~s\n", [bic:format_type(BadMatch)]),
+	    io:format("ERROR bad match ~s | ~w\n",
+		      [bic:format_type(BadMatch), BadMatch]),
 	    1;
 	{error,Reason} ->
 	    io:format("ERROR ~p\n", [Reason]),

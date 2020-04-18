@@ -304,25 +304,28 @@ declarator -> pointer declarator2 :
 		  '$2'#bic_decl { type=bic:combine_types('$1','$2'#bic_decl.type) }.
 
 declarator2 -> identifier : 
-		   #bic_decl { line=line('$1'), name=arg('$1') }.
+		   #bic_decl { line=line('$1'), name=arg('$1')}.
 declarator2 -> '(' declarator ')' : 
 		   '$2'.
-declarator2 -> declarator2 '[' ']' : 
-		   '$1'#bic_decl { type=#bic_array{line=line('$2'),type='$1'#bic_decl.type,dim=[]}}.
+declarator2 -> declarator2 '[' ']' :
+		   '$1'#bic_decl { type=bic:combine_types('$1'#bic_decl.type,
+							  #bic_array{line=line('$2'),type='_',dim=[]}) }.
+
+
 declarator2 -> declarator2 '[' constant_expr ']' : 
 		   '$1'#bic_decl { type=bic:combine_types('$1'#bic_decl.type,
-							  #bic_array{line=line('$2'),dim='$3'}) }.
+							  #bic_array{line=line('$2'),type='_',dim='$3'}) }.
 declarator2 -> declarator2 '(' ')' : 
 		   '$1'#bic_decl { type=bic:combine_types('$1'#bic_decl.type,
-							  #bic_fn{line=line('$2'),params=[]})}.
+							  #bic_fn{line=line('$2'),type='_',params=[]})}.
 declarator2 -> declarator2 '(' parameter_type_list ')' :
 		   '$1'#bic_decl { type=bic:combine_types('$1'#bic_decl.type,
-							  #bic_fn{line=line('$2'),params='$3'}) }.
+							  #bic_fn{line=line('$2'),type='_',params='$3'}) }.
 declarator2 -> declarator2 '(' parameter_identifier_list ')' :
 		   '$1'#bic_decl { type=bic:combine_types('$1'#bic_decl.type,
-							  #bic_fn{line=line('$2'),params='$3'}) }.
+							  #bic_fn{line=line('$2'),type='_',params='$3'}) }.
 pointer -> '*' :
-	       #bic_pointer{line=line('$1')}.
+	       #bic_pointer{line=line('$1'),type='_'}.
 pointer -> '*' type_specifier_list : 
 	       #bic_pointer{line=line('$1'),type='$2'}.
 pointer -> '*' pointer :
@@ -349,7 +352,7 @@ parameter_list -> parameter_list ',' parameter_declaration : '$1'++['$3'].
 parameter_declaration -> type_specifier_list declarator :
 		'$2'#bic_decl { type=bic:combine_types('$1','$2'#bic_decl.type)}.
 parameter_declaration -> type_name : 
-		#bic_decl { type='$1'}. %% FIXME: line number
+			     #bic_decl { line=line('$1'), type='$1'}.
 
 type_name -> type_specifier_list : '$1'.
 type_name -> type_specifier_list abstract_declarator : bic:combine_types('$1','$2').
@@ -359,23 +362,29 @@ abstract_declarator -> abstract_declarator2 : '$1'.
 abstract_declarator -> pointer abstract_declarator2 : bic:combine_types('$1','$2').
 
 abstract_declarator2 -> '(' abstract_declarator ')' : 
-			    '$2'.
+			    %% trick to combine function pointer correct..
+			    case '$2' of
+				#bic_pointer{line=L,type='_'} ->
+				    T = #bic_type{line=L,type='_'},
+				    '$2'#bic_pointer{type=T};
+				_ -> '$2'
+			    end.
 abstract_declarator2 -> '[' ']' :
-			    #bic_array{line=line('$1'),dim=[]}.
+			    #bic_array{line=line('$1'),type='_',dim=[]}.
 abstract_declarator2 -> '[' constant_expr ']' : 
-			    #bic_array{line=line('$1'),dim='$2'}.
+			    #bic_array{line=line('$1'),type='_',dim='$2'}.
 abstract_declarator2 -> abstract_declarator2 '[' ']' : 
-			    bic:combine_types('$1',#bic_array{line=line('$2'),dim=[]}).
+			    bic:combine_types('$1',#bic_array{line=line('$2'),type='_',dim=[]}).
 abstract_declarator2 -> abstract_declarator2 '[' constant_expr ']' : 
-			    bic:combine_types('$1',#bic_array{line=line('$2'),dim='$3'}).
+			    bic:combine_types('$1',#bic_array{line=line('$2'),type='_',dim='$3'}).
 abstract_declarator2 -> '(' ')' : 
-			    #bic_fn{line=line('$1'),params=[]}.
+			    #bic_fn{line=line('$1'),type='_',params=[]}.
 abstract_declarator2 -> '(' parameter_type_list ')' : 
-			    #bic_fn{line=line('$1'),params='$2'}.
+			    #bic_fn{line=line('$1'),type='_',params='$2'}.
 abstract_declarator2 -> abstract_declarator2 '(' ')' : 
-			    #bic_fn{line=line('$2'),type='$1',params=[]}.
+			    bic:combine_types('$1',#bic_fn{line=line('$2'),type='_',params=[]}).
 abstract_declarator2 -> abstract_declarator2 '(' parameter_type_list ')' :
-			    #bic_fn{line=line('$2'),type='$1',params='$3'}.
+			    bic:combine_types('$1',#bic_fn{line=line('$2'),type='_',params='$3'}).
 
 initializer -> assignment_expr : '$1'.
 initializer -> '{' initializer_list '}' : '$2'.
@@ -459,23 +468,22 @@ external_definition -> declaration : '$1'.
 
 function_definition -> declarator function_body : 
 			   {OldDecl,Body} = '$2',
-		       #bic_fn{type=undefined,params=_Params} =
+		       #bic_fn{type='_',params=_Params} =
 			   '$1'#bic_decl.type,
 		       #bic_function { line='$1'#bic_decl.line,
 				       name='$1'#bic_decl.name,
-				       type=#bic_type{type=int},
+				       type=#bic_type{line='$1'#bic_decl.line,
+						      type=int},
 				       params=OldDecl,
 				       body=Body }.
 function_definition -> declaration_specifiers declarator function_body :
 			   {OldDecl,Body} = '$3',
 		       {Storage,TypeSpec} = '$1',
-		       ?dbg("typespec=~s\n", 
-			    [bic:format_type(TypeSpec)]),
-		       ?dbg("declarator=~s\n", 
-			    [bic:format_type('$2'#bic_decl.type)]),
 		       #bic_fn{type=Return,params=Params} =
 			   bic:combine_types(TypeSpec,'$2'#bic_decl.type),
-		       ReturnType = if Return =:= undefined -> [int];
+		       ReturnType = if Return =:= '_' ->
+					    #bic_type{line='$2'#bic_decl.line,
+						      type=int};
 				       true -> Return
 				    end,
 		       FnParams = select_params(OldDecl, Params),
@@ -559,7 +567,5 @@ op({Type,_Line})     -> Type.
 
 arg({_Type,_Line,Val}) -> Val.
 
-line([H|_]) -> line(H);
-line({_,Line}) -> Line;
-line({_,Line,_}) -> Line;
-line({_,Line,_,_}) -> Line.
+%% line([H|_]) -> line(H);
+line(T) when is_tuple(T) -> element(2,T).

@@ -70,11 +70,12 @@
 	{
 	 line      :: integer(),
 	 sign      :: bic_sign(),
-	 const     :: boolean(),
-	 volatile  :: boolean(),
+	 const     :: undefined | boolean(),
+	 volatile  :: undefined | boolean(),
 	 size      :: bic_size(),
-	 type      :: undefined | void | char | int | float | double |
-		      bic_struct() | bic_union() | bic_typeid() | bic_enum()
+	 type      :: undefined | '_' | void | char | int | float | double |
+		      bic_struct() | bic_union() | bic_typeid() | bic_enum() |
+		      bic_pointer()
 	}).
 -type bic_typespec() :: #bic_type{} | bic_struct() | bic_union() |
 			bic_typeid() | bic_enum().

@@ -18,8 +18,10 @@
 -export([format_statements/2]).
 -export([format_definitions/1]).
 -export([combine_types/2]).
+-export([complete_type/1]).
 -export([constant_to_integer/2]).
 -export([constant_to_float/1]).
+
 -compile(export_all).
 
 -import(lists, [map/2]).
@@ -166,19 +168,58 @@ scan(Fd) ->
     %% io:format("Scan: ~p\n", [Res]),
     Res.
 
+%% fill in some blanks in types!
+%% long => long int
+%% unsigned => unsigned int
+%% etc
+
+complete_type(T=#bic_type{type=undefined}) ->
+    if T#bic_type.sign =/= undefined;
+       T#bic_type.size =/= undefined -> T#bic_type{type=int};
+       true -> T  %% probably an error
+    end;
+complete_type(A=#bic_pointer{type=T}) ->
+    A#bic_pointer{type=complete_type(T)};
+complete_type(A=#bic_fn{type=T,params=Ds}) ->
+    A#bic_fn{type=complete_type(T),
+	     params=[D#bic_decl{type=complete_type(D#bic_decl.type)}||D<-Ds]};
+complete_type(A=#bic_array{type=T}) ->
+    A#bic_array{type=complete_type(T)};
+complete_type(A=#bic_struct{elems=Ds}) ->
+    A#bic_struct{elems=[D#bic_decl{type=complete_type(D#bic_decl.type)} 
+			|| D <- Ds]};
+complete_type(A=#bic_union{elems=Ds}) ->
+    A#bic_union{elems=[D#bic_decl{type=complete_type(D#bic_decl.type)} 
+		       || D <- Ds]};
+complete_type(A) -> A.
+	    
+
+    
+
 combine_types(T1,T2) ->
-    ?dbg("combine_types: [ ~s ]  [ ~s ] => ",
-	 [format_type(T1),format_type(T2)]),
+    ?dbg("combine_types: [ ~s ]  [ ~s ] => ",[format_type(T1),format_type(T2)]),
+    %% ?dbg("combine_types: [ ~w ]  [ ~w ] => ", [ T1, T2]),
     R = combine_types_(T1,T2),
     ?dbg("[ ~s ]\n", [format_type(R)]),
+    %% ?dbg("[ ~w ]\n", [R]),
     R.
-    
-combine_types_(A, B=#bic_fn{type=undefined}) -> B#bic_fn{type=A};
+
+combine_types_(A=#bic_pointer{type=T1=#bic_type{type='_'}},
+	       B=#bic_fn{type=T2}) ->
+    A#bic_pointer{type=B#bic_fn{type=combine_types_(T1,T2)}};
+
+combine_types_(undefined, B=#bic_fn{type='_'}) -> B;
+combine_types_(A, B=#bic_fn{type='_'}) -> B#bic_fn{type=A};
 
 combine_types_(A=#bic_pointer{type=T1}, B=#bic_fn{type=T2}) ->
     A#bic_pointer{type=B#bic_fn{type=combine_types_(T1,T2)}};
+
 combine_types_(A=#bic_pointer{type=T1}, B=#bic_array{type=T2}) -> 
     B#bic_array{type=A#bic_pointer{type=combine_types_(T1,T2)}};
+
+combine_types_(T1=#bic_pointer{line=L,type='_'}, undefined) ->
+    T1#bic_pointer{type=#bic_type{line=L,type='_'}}; %%???
+
 combine_types_(A=#bic_pointer{type=T1}, T2) ->
     A#bic_pointer{type=combine_types_(T1,T2)};
 
@@ -188,36 +229,29 @@ combine_types_(T1=#bic_type{}, B=#bic_pointer{type=Const=#bic_type{const=true,ty
 combine_types_(A=#bic_array{type=T1}, T2) ->
     A#bic_array{type=combine_types_(T1,T2)};
 
+combine_types_(undefined,T2) -> T2;
+combine_types_(T1,undefined) -> T1;
+
 combine_types_(T1, B=#bic_pointer{type=T2}) ->
     B#bic_pointer{type=combine_types_(T1,T2)};
 combine_types_(T1, B=#bic_array{type=T2}) ->
     B#bic_array{type=combine_types_(T1,T2)};
+
 combine_types_(T1, B=#bic_fn{type=T2}) ->
     B#bic_fn{type=combine_types_(T1,T2)};
 
-combine_types_(undefined,T2) -> T2;
-combine_types_(T1,undefined) -> T1;
-combine_types_(T1=#bic_type{},T2=#bic_type{}) -> merge_types_(T1,T2).
 
--spec merge_types(T1::bic_typespec(), T2::bic_typespec()) ->
-			 bic_typespec().
-			    
-merge_types(T1, T2) when is_record(T1, bic_type), is_record(T2, bic_type) ->
-    merge_types_(T1,T2);
-merge_types(T1, undefined) ->
-    T1;
-merge_types(undefined, T2) ->
-    T2;
-merge_types(T1=#bic_type{type=undefined}, Type) ->
-    T1#bic_type{type=Type}.
-
-merge_types_(T1,T2) when  is_record(T1, bic_type), is_record(T2, bic_type) ->
+combine_types_('_',T2) -> T2;
+combine_types_(T1,'_') -> T1;
+combine_types_(T1=#bic_type{},T2=#bic_type{}) ->
     T2#bic_type { sign     = defined(T1#bic_type.sign, T2#bic_type.sign),
 		  const    = defined(T1#bic_type.const, T2#bic_type.const),
 		  volatile = defined(T1#bic_type.volatile, T2#bic_type.volatile),
 		  size     = defined(T1#bic_type.size, T2#bic_type.size),
 		  type     = defined(T1#bic_type.type, T2#bic_type.type) }.
 
+defined('_', V) -> V;
+defined(V, '_') -> V;
 defined(undefined, V) -> V;
 defined(V, undefined) -> V;
 defined(long, long) ->  long_long;
@@ -227,7 +261,8 @@ defined(V, _W) ->
     io:format("error: merge values ~p and ~p\n", [V, _W]),
     V.
 
-format_type(undefined) -> "_";
+format_type(undefined) -> "N";
+format_type('_') -> "_";
 format_type(#bic_typeid{name=Name}) -> Name;
 format_type(#bic_type{sign=S,const=C,volatile=V,size=Z,type=T}) ->
     [if C -> "const "; true -> "" end,
@@ -245,22 +280,26 @@ format_type(#bic_type{sign=S,const=C,volatile=V,size=Z,type=T}) ->
      end,
      case T of
 	 undefined when S =/= undefined; Z =/= undefined -> "";
-	 undefined -> "_";
+	 undefined -> "U";
+	 '_' -> "T";
 	 void -> "void ";
 	 char -> "char";
 	 int -> "int";
 	 float -> "float";
 	 double -> "double";
-	 #bic_typeid{name=Name} -> [Name];
-	 #bic_pointer{} -> ["(",format_type(T),")"];
 	 #bic_struct{} -> format_type(T);
 	 #bic_union{} -> format_type(T);
-	 #bic_enum{} -> format_type(T)
+	 #bic_typeid{name=Name} -> [Name];
+	 #bic_enum{} -> format_type(T);
+	 #bic_pointer{} -> ["(",format_type(T),")"]
      end];
 format_type(#bic_enum{name=Name,elems=Es}) ->
     ["enum ",optional(Name)," {", format_enums(Es), "}"];
-%% format_type(#bic_pointer{type=Type=#bic_fn{}}) ->
-%%    ["(*)",format_type(Type)];
+
+%% fixme: pointer to function pointer?
+format_type(#bic_pointer{type=Type=#bic_fn{}}) -> 
+    ["(*)",format_type(Type)];
+
 format_type(#bic_pointer{type=Type}) ->
     [format_type(Type),"*"];
 format_type(#bic_array{type=Type,dim=D}) ->
@@ -449,3 +488,5 @@ constant_to_integer(String, Base) ->
 
 constant_to_float(String) ->
     list_to_float(string:trim(String,trailing,"fFlL")).
+
+
