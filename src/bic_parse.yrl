@@ -338,13 +338,15 @@ type_specifier_list -> type_specifier_list type_specifier :
 			   bic:combine_types('$1','$2').
 
 parameter_identifier_list -> identifier_list : '$1'.
-parameter_identifier_list -> identifier_list ',' '...' : '$1'++['$3'].
+parameter_identifier_list -> identifier_list ',' '...' : 
+				 '$1'++[#bic_decl{line=line('$3'),type=#bic_typeid{name="..."}}].
 
 identifier_list -> identifier : [id('$1')].
 identifier_list -> identifier_list ',' identifier : '$1'++[id('$3')].
 
 parameter_type_list -> parameter_list : '$1'.
-parameter_type_list -> parameter_list ',' '...' : '$1' ++ ['$3'].
+parameter_type_list -> parameter_list ',' '...' : 
+			   '$1' ++ [#bic_decl{line=line('$3'),type=#bic_typeid{name="..."}}].
 
 parameter_list -> parameter_declaration : ['$1'].
 parameter_list -> parameter_list ',' parameter_declaration : '$1'++['$3'].

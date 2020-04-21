@@ -115,7 +115,8 @@ print(Filename) ->
 print(Filename, Env) ->
     case file(Filename, Env) of
 	{ok,Forms} ->
-	    io:put_chars(format_definitions(Forms));
+	    Forms1 = bic_transform:variables(Forms),
+	    io:put_chars(format_definitions(Forms1));
 	Error ->
 	    Error
     end.
@@ -306,12 +307,8 @@ format_type(#bic_pointer{type=Type=#bic_fn{}}) ->
 
 format_type(#bic_pointer{type=Type}) ->
     [format_type(Type),"*"];
-format_type(#bic_array{type=Type,dim=D}) ->
-    if D =:= [] ->
-	    [format_type(Type),"[]"];
-       true ->
-	    [format_type(Type),"[",format_expr(D),"]"]
-    end;
+format_type(#bic_array{type=Type,dim=_D}) ->
+    [format_type(Type)];
 format_type(#bic_fn{type=Type,params=Ps}) ->
     [format_type(Type),"(",format_params(Ps),")"];
 format_type(#bic_struct{name=Name,elems=undefined}) ->
@@ -322,6 +319,16 @@ format_type(#bic_union{name=Name,elems=undefined}) ->
     ["union ",optional(Name)];
 format_type(#bic_union{name=Name,elems=Es}) ->
     ["union ",optional(Name),"{", format_decls(Es),"}"].
+
+
+format_dim(#bic_type{type=T}) when not is_atom(T) ->
+    format_dim(T);
+format_dim(#bic_array{type=T,dim=[]}) ->
+    [format_dim(T), "[]"];
+format_dim(#bic_array{type=T,dim=D}) ->
+    [format_dim(T),["[",format_expr(D),"]"]];
+format_dim(_) ->
+    [].
 
 optional(undefined) -> "";
 optional(String) when is_list(String) -> String.
@@ -342,9 +349,9 @@ format_enums([X|Xs]) -> [format_enum(X),",",format_enums(Xs)].
 -spec format_decl(Decl::bic_decl()) -> string().
 
 format_decl(#bic_decl{name=undefined,storage=Storage,type=Type,size=Size,value=Init}) ->
-    [format_storage(Storage),format_type(Type),format_size(Size),format_init(Init)];
-format_decl(#bic_decl{name=Name, storage=Storage,type=Type,size=Size,value=Init}) ->
-    [format_storage(Storage),format_type(Type)," ",Name,format_size(Size),format_init(Init)].
+    [format_storage(Storage),format_type(Type),format_dim(Type),format_size(Size),format_init(Init)];
+format_decl(#bic_decl{name=Name,storage=Storage,type=Type,size=Size,value=Init}) ->
+    [format_storage(Storage),format_type(Type)," ",Name,format_dim(Type),format_size(Size),format_init(Init)].
 
 format_size(undefined) -> "";
 format_size(Size) -> [":",format_expr(Size)].
@@ -378,7 +385,9 @@ format_expr(#bic_unary{op='---',arg=Arg}) ->
 format_expr(#bic_unary{op=Op,arg=Arg}) -> 
     [atom_to_list(Op),format_expr(Arg)];
 format_expr(#bic_binary{op='[]',arg1=Arg1,arg2=Arg2}) -> 
-    [format_expr(Arg1),"[",format_expr(Arg2),"]"];    
+    [format_expr(Arg1),"[",format_expr(Arg2),"]"];
+format_expr(#bic_binary{op=cast,arg1=Type,arg2=Arg2}) -> 
+    ["(",format_type(Type),")",format_expr(Arg2)];    
 format_expr(#bic_binary{op=Op,arg1=Arg1,arg2=Arg2}) -> 
     [format_expr(Arg1),atom_to_list(Op),format_expr(Arg2)];
 format_expr(#bic_call{func=F, args=Exprs}) ->
@@ -387,7 +396,7 @@ format_expr(#bic_ifexpr{test=C,then=T,else=E}) ->
     [format_expr(C),"?",format_expr(T),":",format_expr(E)];
 format_expr(#bic_assign{op=Op,lhs=L,rhs=R}) ->
     [format_expr(L),atom_to_list(Op),format_expr(R)];
-format_expr(Array) when is_list(Array) -> %% init?
+format_expr(Array) when is_list(Array) -> %% array init?
     ["{", format_exprs(Array), "}"].
 
 -spec format_exprs(ExprList::[bic_expr()]) -> string().
@@ -401,12 +410,12 @@ format_definitions([]) ->
 format_definitions([D|Ds]) ->
     [case D of
 	#bic_function{name=Name,storage=Storage,type=Type,params=Params,body=Body} ->
-	     [format_storage(Storage),format_type(Type)," ",Name,
+	     [format_storage(Storage),format_type(Type),format_dim(Type)," ",Name,
 	      "(",format_params(Params),")", "\n",
 	      format_statement(Body, 0)];
 	 #bic_typedef{name=Name,storage=Storage,type=Type,size=Size,value=_Init} ->
-	     ["typedef ", format_storage(Storage),format_type(Type),format_size(Size),
-	      " ",Name,";\n"];
+	     ["typedef ", format_storage(Storage),format_type(Type),
+	      format_size(Size)," ",Name,format_dim(Type),";\n"];
 	 #bic_decl{} ->
 	     [format_decl(D),";\n"]
      end | format_definitions(Ds)].
@@ -466,7 +475,8 @@ format_statement(Stmt, I) ->
 	 #bic_empty{} ->
 	     [";\n"];
 	 #bic_decl{name=Name,type=Type,size=Size,value=Init} ->
-	     [format_type(Type)," ",Name,format_size(Size),format_init(Init),";\n"];
+	     [format_type(Type)," ",Name,format_dim(Type),
+	      format_size(Size),format_init(Init),";\n"];
 	 Expr ->
 	     [format_expr(Expr), ";\n"]
      end].
