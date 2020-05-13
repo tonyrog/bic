@@ -11,6 +11,8 @@
 
 -include("bic.hrl").
 
+%% -define(debug, true).
+
 -define(Q, $\").  %% "stupid emacs mode!
 -define(LP,$\().
 -define(RP,$\)).
@@ -77,12 +79,14 @@
 -record(save,
 	{
 	  fd,        %% character input 
+	  readf,     %% read functions
 	  file,      %% file name
 	  line,      %% line number
 	  line1,     %% next line number
 	  inc_level, %% include level
 	  if_stack,  %% current if stack
-	  pwd,       %% current working directory
+	  cwd,       %% current working directory
+	  lbuf,
 	  cbuf       %% stored data from file
 	 }).
 
@@ -97,7 +101,7 @@
 	  if_stack=[],     %% {Tag,0|1|2,Ln}
 	  inc_stack=[],    %% #save {}
 	  expand=[],       %% current macro expansion
-	  pwd,             %% current working directory
+	  cwd,             %% current working directory
 	  include=[],      %% search path for #include <foo.h> 
 	  qinclude=[],     %% search path for #include "foo.h"
 	  defs,            %% dict of defines {Name,Value}
@@ -237,12 +241,13 @@ init([{string,String},UserOpts]) ->
     Include = init_include(UserOpts,["/usr/local/include", 
 				     "/usr/include"]),
     QInclude = init_qinclude(UserOpts,[]),
+    {ok,Cwd} = file:get_cwd(),
     S = #s { file = File,
 	     readf = fun() -> eof end,
 	     line = 0,
 	     line1 = 0,
 	     inc_level = 0,
-	     pwd = ".",
+	     cwd = Cwd,
 	     include = Include,
 	     qinclude = QInclude,
 	     defs = Defs,
@@ -266,7 +271,7 @@ init([{file,File},UserOpts]) ->
 		     line = 0,
 		     line1 = 0,
 		     inc_level = 0,
-		     pwd = ".",
+		     cwd = filename:dirname(File),
 		     include = Include,
 		     qinclude = QInclude,
 		     defs = Defs,
@@ -901,14 +906,14 @@ directive(S, Ts, ?TRUE) ->
 		    %% #include <string>
 		    case search_path(Ts3) of
 			{ok,File} ->
-			    cpp_include(S,File,search);
+			    cpp_include(S1,File,search);
 			{error,Fmt,A} ->
-			    error(S, Fmt, A),
-			    {empty,S}
+			    error(S1, Fmt, A),
+			    {empty,S1}
 		    end;
-		_ ->
-		    error(S, "bad arguments given in #include directive",[]),
-		    {empty, S}
+		_ -> 
+		    error(S1, "bad arguments given in #include directive",[]),
+		    {empty, S1}
 	    end;
 
 	%% #include_next  ???
@@ -995,7 +1000,7 @@ cpp_if(S0,Ts0,Tag) ->
 	{ok,CTs,_} ->
 	    %% Put scanned tokens in a parsable for:
 	    %% int _ = Ts;
-	    Ln = S0#s.line,
+	    Ln = S1#s.line,
 	    CTs1 = [{int,Ln},{identifier,Ln,"_"},{'=',Ln}|CTs]++[{';',Ln}],
 	    ?dbg("if: CTs1=~p\n", [CTs1]),
 	    case bic_parse:parse(CTs1) of
@@ -1018,7 +1023,7 @@ cpp_if(S0,Ts0,Tag) ->
 %% | #include <file>
 %%
 cpp_include(S,File,quoted) ->
-    Path = [S#s.pwd]++S#s.qinclude ++ S#s.include,
+    Path = [S#s.cwd]++S#s.qinclude ++ S#s.include,
     cpp_include_path(S, File, Path);
 cpp_include(S,File,search) ->
     Path = S#s.include,
@@ -1033,6 +1038,7 @@ cpp_include_path(S, Name, [Path | Ps]) ->
 	    State = save(S),
 	    Level = S#s.inc_level + 1,
 	    S1 = S#s { fd = Fd,
+		       readf = fun() -> file:read(Fd, ?CHUNK_SIZE) end,
 		       file = File,
 		       line = 1,
 		       line1 = 1,
@@ -1040,11 +1046,15 @@ cpp_include_path(S, Name, [Path | Ps]) ->
 		       inc_stack = [State | S#s.inc_stack],
 		       if_stack = [],
 		       cbuf = [],
-		       pwd = filename:dirname(File)
+		       lbuf = [],
+		       cwd = filename:dirname(File)
 		     },
 	    {auto_line(1,File,1),S1};
-	{error,_} ->
-	    cpp_include_path(S,Name,Ps)
+	{error, enoent} ->
+	    cpp_include_path(S,Name,Ps);
+	{error,Error} ->
+	    error(S, "~s: error ~s", [File, Error]),
+	    {empty, S}
     end;
 cpp_include_path(S,File,[]) ->
     error(S, "~s: No such file or directory", [File]),
@@ -1058,12 +1068,14 @@ cpp_include_path(S,File,[]) ->
 save(S) ->
     ?dbg("Save file ~s:~w\n", [S#s.file,S#s.line]),
     #save { fd       = S#s.fd,
+	    readf    = S#s.readf,
 	    file     = S#s.file,
 	    line     = S#s.line,
 	    line1    = S#s.line1,
 	    if_stack = S#s.if_stack,
-	    pwd      = S#s.pwd,
+	    cwd      = S#s.cwd,
 	    cbuf     = S#s.cbuf,
+	    lbuf     = S#s.lbuf,
 	    inc_level = S#s.inc_level
 	  }.
 
@@ -1071,18 +1083,21 @@ restore(S,Tok) ->
     case S#s.inc_stack of
 	[] ->
 	    {Tok,S};
-	[#save { fd=Fd, file=File, line=Line, line1=Line1, 
-		 inc_level=Level, if_stack=Stack, 
-		 pwd=Pwd, cbuf=CBuf
-	       }|Is] ->
+	[R | Is] ->
 	    ?dbg("Restore file ~s:~w\n", [File,Line]),
-	    LBuf = S#s.lbuf ++ [auto_line(Line,File,2)],
-	    S1 = S#s { file=File, fd = Fd, line=Line, line1=Line1,
-		       inc_level = Level, if_stack = Stack, 
+	    LBuf1 = S#s.lbuf ++ [auto_line(R#save.line,R#save.file,2)] ++ 
+		R#save.lbuf,
+	    S1 = S#s { file= R#save.file, 
+		       readf = R#save.readf,
+		       fd = R#save.fd, 
+		       line= R#save.line,
+		       line1= R#save.line1,
+		       inc_level = R#save.inc_level,
+		       if_stack = R#save.if_stack, 
 		       inc_stack = Is,
-		       pwd = Pwd, 
-		       cbuf=CBuf, 
-		       lbuf = LBuf
+		       cwd = R#save.cwd, 
+		       cbuf = R#save.cbuf, 
+		       lbuf = LBuf1
 		     },
 	    read_0(S1)
     end.
