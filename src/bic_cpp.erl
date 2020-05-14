@@ -120,6 +120,40 @@
 %% API
 %%====================================================================
 
+string(String) ->
+    string(String,[]).
+
+string(String, Env) ->
+    gen_server:start_link(?MODULE, [{string,String},Env], []).    
+				    
+open(File) ->
+    open(File, []).
+
+open(File, Env) ->
+    gen_server:start_link(?MODULE, [{file,File},Env], []).
+
+close(PFd) when is_pid(PFd) ->
+    gen_server:call(PFd, close).
+
+read(PFd) when is_pid(PFd) ->
+    gen_server:call(PFd, read).
+
+read_line(PFd) when is_pid(PFd) ->
+    gen_server:call(PFd, read_line).
+
+line(PFd) when is_pid(PFd) ->
+    value(PFd, "__LINE__").
+
+file(PFd) when is_pid(PFd) ->
+    value(PFd,"__FILE__").
+
+value(PFd, Var) ->
+    gen_server:call(PFd, {value, Var}).
+
+values(PFd) ->
+    gen_server:call(PFd, values).
+
+
 command() ->
     io:format(standard_error, "bicpp: no input files\n", []),
     halt(1).
@@ -190,39 +224,6 @@ dump_defs(PFd) ->
 	      io:format("~s=~s\n", 
 			[Name, format_tokens(Def)])
       end, List).
-
-string(String) ->
-    string(String,[]).
-
-string(String, Env) ->
-    gen_server:start_link(?MODULE, [{string,String},Env], []).    
-				    
-open(File) ->
-    open(File, []).
-
-open(File, Env) ->
-    gen_server:start_link(?MODULE, [{file,File},Env], []).
-
-close(PFd) when is_pid(PFd) ->
-    gen_server:call(PFd, close).
-
-read(PFd) when is_pid(PFd) ->
-    gen_server:call(PFd, read).
-
-read_line(PFd) when is_pid(PFd) ->
-    gen_server:call(PFd, read_line).
-
-line(PFd) when is_pid(PFd) ->
-    value(PFd, "__LINE__").
-
-file(PFd) when is_pid(PFd) ->
-    value(PFd,"__FILE__").
-
-value(PFd, Var) ->
-    gen_server:call(PFd, {value, Var}).
-
-values(PFd) ->
-    gen_server:call(PFd, values).
 
 %%====================================================================
 %% gen_server callbacks
@@ -312,7 +313,7 @@ handle_call(close, _From, S) ->
 handle_call({value,Var}, _From, S) ->
     {reply, value_(S,Var), S};
 handle_call(values, _From, S) ->
-    {reply, dict:to_list(S#s.defs), S};
+    {reply, maps:to_list(S#s.defs), S};
 handle_call(_Call, _From, S) ->
     {reply, {error,bad_call}, S}.
 
@@ -383,12 +384,12 @@ init_qinclude([], Paths) ->
 
 init_defs(Opts) ->
     foldl(fun({define,N,V},D) when is_list(V) ->
-		  dict:store(N, [{string,0,V}], D);
+		  maps:put(N, [{string,0,V}], D);
 	     ({define,N,V},D) when is_integer(V) ->
-		  dict:store(N, [{decnum,0,integer_to_list(V)}], D);
+		  maps:put(N, [{decnum,0,integer_to_list(V)}], D);
 	     (_, D) ->
 		  D
-	  end, dict:new(), Opts).
+	  end, maps:new(), Opts).
 
 %% Return a list of default options
 default_opts(_File) ->
@@ -604,7 +605,7 @@ expand_tokens(S, [T|Ts], Acc) ->
 		    ?dbg("Recursive definition parameter ~s\n", [X]),
 		    expand_tokens(S,Ts,[T|Acc]);
 		false ->
-		    case dict:find(X,S#s.defs) of
+		    case maps:find(X,S#s.defs) of
 			error ->
 			    expand_tokens(S,Ts,[T|Acc]);
 			{ok,{Params,Body}} ->
@@ -731,13 +732,13 @@ expand_def_stringify(S, Ln, X, Ts, Acc) ->
 %%
 bind_args([{arg,A}|As], [V|Vs], Dict) ->
     ?dbg("bind: ~s  = ~s\n", [A, ts_to_cs(V)]),
-    Dict1 = dict:store(A, {param,V}, Dict),
+    Dict1 = maps:put(A, {param,V}, Dict),
     bind_args(As, Vs, Dict1);
 bind_args([{varg,A}], Vs, Dict) ->
     %% insert , between param values
     Vs1 = ts_arg_list(Vs),
     ?dbg("bind: ~s  = ~s\n", [A, ts_to_cs(Vs1)]),
-    dict:store(A, {param,Vs1}, Dict);
+    maps:put(A, {param,Vs1}, Dict);
 bind_args([], [], Dict) ->
     Dict.
 
@@ -848,6 +849,7 @@ directive(S, Ts, ?TRUE) ->
 
 	%% #ifdef <id>
 	[{identifier,_Ln,"ifdef"},{blank,_,_},{identifier,_,Var}|_Ts1] ->
+	    %% io:format("#ifdef ~s is ~w\n", [Var, defined(S,Var)]),
 	    {{'#ifdef',defined(S,Var)},S};
 	[{identifier,_Ln,"ifdef"}|_Ts1] ->
 	    error(S,"no macro name given in #ifdef directive",[]),
@@ -1327,7 +1329,7 @@ to_float(String) ->
     end.
 
 defined(S,Var) ->
-    case dict:find(Var,S#s.defs) of
+    case maps:find(Var,S#s.defs) of
 	error ->
 	    if Var =:= "__LINE__";
 	       Var =:= "__FILE__" ->
@@ -1361,7 +1363,7 @@ define(S,Var,Value) ->
 		1 -> warning(S, "\"~s\" redefined\n", [Var]);
 		0 -> ok
 	    end,
-	    D = dict:store(Var, Value, S#s.defs),
+	    D = maps:put(Var, Value, S#s.defs),
 	    S#s { defs = D }
     end.
 
@@ -1373,36 +1375,36 @@ undef(S, Var) ->
 	Var =:= "__LINE__";
 	Var =:= "__FILE__" ->
 	    warning(S, "undefining ~s", [Var]),
-	    D = dict:store(Var, ?UNDEF, S#s.defs),
+	    D = maps:put(Var, ?UNDEF, S#s.defs),
 	    S#s { defs = D };
 	true ->
-	    D = dict:erase(Var, S#s.defs),
+	    D = maps:remove(Var, S#s.defs),
 	    S#s { defs = D }
     end.
 
 
 %% Get variable token value 
 dict_value(S,"__LINE__") ->
-    case dict:find("__LINE__",S#s.defs) of
+    case maps:find("__LINE__",S#s.defs) of
 	error -> [{decnum,S#s.line,integer_to_list(S#s.line)}];
 	{ok,?UNDEF} -> [];
 	{ok,Val} -> Val
     end;
 dict_value(S,"__FILE__") ->
-    case dict:find("__FILE__",S#s.defs) of
+    case maps:find("__FILE__",S#s.defs) of
 	error -> [{string,S#s.line,S#s.file}];
 	{ok,?UNDEF} -> [];
 	{ok,Val} -> Val
     end;
 dict_value(S,ID) ->
-    case dict:find(ID,S#s.defs) of
+    case maps:find(ID,S#s.defs) of
 	error -> [];
 	{ok,{param,Val}} -> Val;
 	{ok,Val} -> Val
     end.
 
 dict_param(S, ID) ->
-    case dict:find(ID,S#s.defs) of
+    case maps:find(ID,S#s.defs) of
 	{ok,{param,Val}} -> Val;
 	_ -> []
     end.
