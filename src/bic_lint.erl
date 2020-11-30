@@ -501,7 +501,7 @@ expr(#bic_ifexpr { line=Ln, test=Test, then=Then, else=Else}, S0) ->
     {CElse,S3} = expr(Else,S2),
     %% CThen and CElse must be compatible
     %% {CType,S3} = check_type(Op,CTest,CElse,S3),
-    {CType,S4} = check_type('==',CThen,CElse,S3),
+    {CType,S4} = check_type(Ln,'==',CThen,CElse,S3),
     {#cifexpr { line=Ln, test=CTest, type=CType, then=CThen, else=CElse}, S4};
 expr([X | Xs], S0) ->
     {CX,S1}  = expr(X,S0),
@@ -602,6 +602,7 @@ check_type(Ln, Op, T, S) ->
 	    end;
        true ->
 	    S1 = add_error(S,Ln,"operator ~s not expected",[Op]),
+	    io:format("T = ~w, S1 = ~w\n", [T, S1]),
 	    {T#ctype{line=Ln}, S1}
     end.
 
