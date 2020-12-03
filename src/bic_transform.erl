@@ -10,8 +10,9 @@
 -compile(export_all).
 
 -export([fold/3]).   %% fold over code (depth first)
--export([used_variables/1]).
+-export([used/1, calls/1]).
 -export([unique/1]).
+-export([func_ref/2]).
 
 -include_lib("../include/bic.hrl").
 
@@ -20,15 +21,26 @@
 -type form() :: bic_expr() | bic_statement() |
 		bic_declaration() | bic_forms().
 
--spec used_variables(form()) -> #{ string() => true }.
+-spec used(form()) -> [ Var::string() ].
 	  
-used_variables(Form) ->
+used(Form) ->
     {_,Set} = fold(fun(F=#bic_id{name=X}, Set) ->
 			   {F, Set#{ X => true }};
 		      (F, Set) ->
 			   {F, Set}
-		   end, Form, #{}),
-    maps:fold(fun(K,V,A) -> [{K,V}|A] end, [], Set).
+		   end, #{}, Form),
+    maps:fold(fun(Var,true,A) -> [Var|A] end, [], Set).
+
+-spec calls(form()) -> [Call::string()].
+
+calls(Form) ->
+    {_,Set} = fold(fun
+		       (F=#bic_call{func=#bic_id{name=X}}, Set) ->
+			   {F, Set#{ X => true }};
+		       (F, Set) ->
+			   {F, Set}
+		   end, #{}, Form),
+    maps:fold(fun(Call,true,A) -> [Call|A] end, [], Set).
 
 %% make (local) variables uniq
 
@@ -110,6 +122,41 @@ find_var(Var, [Scope|Stack]) ->
     end;
 find_var(_Var, []) ->
     error.
+
+%% - extract functions referenced in RefList
+%% - add functions that are referenced again
+
+func_ref(Stmts, []) ->
+    Stmts;
+func_ref(Stmts, RefList) ->
+    %% partition Stms in functions=S0,from non-functions S1
+    {S0,S1} = lists:partition(fun(S) -> is_record(S, bic_function) end, Stmts),
+    %% partition functions in Referenced S2 and unreferenced S3
+    {S2,S3} = 
+	lists:partition(
+	  fun(#bic_function{name=Name}) ->
+		  lists:member(Name, RefList)
+	  end, S0),
+    %% extract all calls from S2
+    {_,Calls} = 
+	fold(
+	  fun(F=#bic_call{func=#bic_id{name=Name}}, Set) ->
+		  {F,Set#{ Name => true }};
+	     (F,Set) -> 
+		  {F,Set}
+	  end, #{}, S2),
+
+    %% Add all functions in S3 that are in Calls
+    S4 = 
+	lists:filter(
+	  fun(#bic_function{name=Name}) ->
+		  case maps:find(Name, Calls) of
+		      {ok,_} -> true;
+		      _ -> false
+		  end;
+	     (_) -> false
+	  end, S3),
+    S1 ++ S4 ++ S2.
 
 %% dive into expression and replace / remove statemets/expressions...
 
@@ -250,10 +297,14 @@ fold(Fun, Acc0, Form) ->
 	    {Stmts1,Acc1} = fold_compound(Fun,Acc0,Line,Stmts),
 	    Form1 = Form#bic_compound{code=Stmts1},
 	    Fun(Form1,Acc1);
-	_ when is_list(Form) -> %% alternate compound form, needed?
+	%% alternate compound form, needed?
+	[] ->
+	    {Form,Acc0};
+	_ when is_list(Form) ->
 	    Line = element(2,hd(Form)), %% is this the line number?
 	    {Form1,Acc1} = fold_compound(Fun,Acc0,Line,Form),
 	    Fun(Form1,Acc1);
+	%% unknown or ignored,
 	_ ->
 	    {Form,Acc0}
     end.
