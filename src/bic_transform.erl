@@ -9,181 +9,268 @@
 
 -compile(export_all).
 
+-export([fold/3]).   %% fold over code (depth first)
+-export([used_variables/1]).
+-export([unique/1]).
+
 -include_lib("../include/bic.hrl").
+
+-define(dbg(F,A), ok).
+
+-type form() :: bic_expr() | bic_statement() |
+		bic_declaration() | bic_forms().
+
+-spec used_variables(form()) -> #{ string() => true }.
+	  
+used_variables(Form) ->
+    {_,Set} = fold(fun(F=#bic_id{name=X}, Set) ->
+			   {F, Set#{ X => true }};
+		      (F, Set) ->
+			   {F, Set}
+		   end, Form, #{}),
+    maps:fold(fun(K,V,A) -> [{K,V}|A] end, [], Set).
 
 %% make (local) variables uniq
 
-variables([D|Ds]) ->
-    case D of 
-	#bic_function{} ->
-	    D1 = function(D),
-	    [D1 | variables(Ds)];
+-spec unique(Ds::[bic_declaration()]) ->
+	  [bic_declaration()].
+
+unique([D|Ds]) ->
+    case D of
+	#bic_function{params=Params,body=Body} ->
+	    S1 = map_params(Params, new_scope()),
+	    {Body1,_} = unique_stmts(Body, S1),
+	    [D#bic_function{body=Body1} | unique(Ds)];
 	_ ->
-	    [D | variables(Ds)]
+	    [D | unique(Ds)]
     end;
-variables([]) ->
+unique([]) ->
     [].
 
-function(F=#bic_function{params=Params,body=Body}) ->
-    {Params1,Scope} = decl_list(Params, #{}),
-    Body1 = statement(Body, Scope),
-    F#bic_function{params=Params1,body=Body1}.
+%% keep parameter names, they must be unique
+map_params(Decls, S) ->
+    lists:foldl(fun(#bic_decl{name=Name},Si) ->
+			decl(Name,Name,Si)
+		end, S, Decls).
 
-statement(Body, Scope) when is_list(Body) ->
-    {Body1, _Scope} = statement(Body, [], Scope),
-    Body1;
-statement(Stmt, Scope) ->
-    {[Stmt1],_Scope} = statement([Stmt], [], Scope),
-    Stmt1.
+unique_stmts(Body, Map) ->
+    fold(
+      fun(F=#bic_begin{}, S0) ->
+	      S1 = push_scope(S0),
+	      {F, S1};
+	 (F=#bic_end{}, S0) ->
+	      S1 = pop_scope(S0),
+	      {F, S1};
+	 (F=#bic_id{name=V}, S0) ->
+	      V1 = maps:get(V, S0),
+	      {F#bic_id{name=V1}, S0};
+	 (F=#bic_decl{name=V},Si) ->
+	      case maps:find(V, Si) of
+		  error ->
+		      {F, decl(V,V,Si)};
+		  {ok,_W} ->
+		      Next = maps:get(next,Si),
+		      VV = V ++ "__" ++ integer_to_list(Next),
+		      %% FIXME: check if VV exist
+		      {F#bic_decl{name=VV}, decl(V, VV, Si#{ next => Next+1 })}
+	      end;
+	 (F, Mi) ->
+	      {F,Mi}
+      end, Map, Body).
 
-statement([Stmt|Stmts], Acc, Scope) ->
-    case Stmt of
-	#bic_decl{type=Type,value=undefined} ->
-	    Stmt1 = Stmt#bic_decl{type=type(Type,Scope)},
-	    {Stmt2,Scope1} = decl(Stmt1, Scope),
-	    statement(Stmts, [Stmt2|Acc], Scope1);
-	#bic_decl{type=Type,value=Value} ->
-	    Stmt1 = Stmt#bic_decl{type=type(Type,Scope),
-				  value=expr(Value,Scope)},
-	    {Stmt2,Scope1} = decl(Stmt1, Scope),
-	    statement(Stmts, [Stmt2|Acc], Scope1);
-	#bic_for{init=Init,test=Test,update=Update,body=Body} ->
-	    Body1 = statement(Body, Scope),
-	    Stmt1 = Stmt#bic_for{init=expr(Init,Scope),
-				 test=expr(Test,Scope),
-				 update=expr(Update,Scope),
-				 body=Body1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_while{test=Test,body=Body} ->
-	    Body1 = statement(Body, Scope),
-	    Stmt1 = Stmt#bic_while{test=expr(Test,Scope),
-				   body=Body1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_do{test=Test,body=Body} ->
-	    Body1 = statement(Body, Scope),
-	    Stmt1 = Stmt#bic_do{test=expr(Test,Scope),
-				body=Body1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_if{test=Test, then=Then, else=undefined } ->
-	    Then1 = statement(Then, Scope),
-	    Stmt1 = Stmt#bic_if{test=expr(Test,Scope),
-				then=Then1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_if{test=Test, then=Then, else=Else } ->
-	    Then1 = statement(Then, Scope),
-	    Else1 = statement(Else, Scope),
-	    Stmt1 = Stmt#bic_if{test=expr(Test,Scope),
-				then=Then1, else=Else1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_switch{expr=Expr,body=Body} ->
-	    Body1 = statement(Body, Scope),
-	    Stmt1 = Stmt#bic_switch{expr=expr(Expr,Scope),
-				    body=Body1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_case{expr=Expr,code=Code} ->
-	    Code1 = statement(Code, Scope),
-	    Stmt1 = Stmt#bic_case{expr=expr(Expr,Scope),
-				  code=Code1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_default{code=Code} ->
-	    Code1 = statement(Code, Scope),
-	    Stmt1 = Stmt#bic_default{code=Code1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_label{code=Code} ->
-	    Code1 = statement(Code, Scope),
-	    Stmt1 = Stmt#bic_label{code=Code1},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_goto{} ->
-	    statement(Stmts, [Stmt|Acc], Scope);
-	#bic_continue{} ->
-	    statement(Stmts, [Stmt|Acc], Scope);
-	#bic_break{} ->
-	    statement(Stmts, [Stmt|Acc], Scope);
-	#bic_return{expr=undefined} ->
-	    statement(Stmts, [Stmt|Acc], Scope);
-	#bic_return{expr=Expr} ->
-	    Stmt1 = Stmt#bic_return{expr=expr(Expr,Scope)},
-	    statement(Stmts, [Stmt1|Acc], Scope);
-	#bic_empty{} ->
-	    statement(Stmts, [Stmt|Acc], Scope);
-	Expr ->
-	    Stmt1 = expr(Expr, Scope),
-	    statement(Stmts, [Stmt1|Acc], Scope)
+new_scope() ->
+    #{ next=>1, scope=>#{}, stack=>[] }.
+
+push_scope(S=#{ scope := Scope, stack := Stack }) ->
+    S#{ scope => #{}, stack=> [Scope|Stack] }.
+
+pop_scope(S=#{ scope := Scope, stack := Stack=[Scope1|Stack1] }) ->
+    S1 = maps:fold(
+	   fun(Var,_,Si) ->
+		   case find_var(Var,Stack) of
+		       {ok,W} ->
+			   ?dbg("pop: ~s => ~s\n", [Var, W]),
+			   Si#{ Var => W }; %% restore
+		       error -> 
+			   ?dbg("remove: ~s\n", [Var]),
+			   maps:remove(Var,Si)  %% not used any more
+		   end
+	   end, S, Scope),
+    S1#{ scope=>Scope1, stack=>Stack1 }.
+
+decl(Name,NewName,S=#{ scope := Scope} ) ->
+    ?dbg("~s => ~s\n", [Name, NewName]),
+    S#{ Name => NewName, scope => Scope#{ Name => NewName } }.
+
+%% Check if Var is present in current scope stack
+find_var(Var, [Scope|Stack]) ->
+    case maps:find(Var, Scope) of
+	{ok,W} -> {ok,W};
+	error -> find_var(Var,Stack)
     end;
-statement([], Acc, Scope) ->
-    {lists:reverse(Acc), Scope}.
+find_var(_Var, []) ->
+    error.
 
-type(Type, Scope) ->
-    case Type of
-	#bic_typeid{} -> Type;
-	#bic_type{type=Type1} ->
-	    if is_atom(Type1) -> Type;
-	       true -> Type#bic_type{type=type(Type1,Scope)}
-	    end;
-	#bic_enum{} -> Type;
-	#bic_pointer{type=Type1} ->
-	    Type#bic_pointer{type=type(Type1,Scope)};
-	#bic_array{type=Type1,dim=[]} ->
-	    Type#bic_pointer{type=type(Type1,Scope)};
-	#bic_array{type=Type1,dim=Dim} ->
-	    Type#bic_array{type=type(Type1,Scope),dim=expr(Dim,Scope)};
-	#bic_struct{} -> Type;  %% Check!
-	#bic_union{} -> Type;  %% Check!
-	#bic_fn{} -> Type  %% Check!
-    end.
+%% dive into expression and replace / remove statemets/expressions...
 
-expr(Expr, Scope) ->
-    case Expr of
-	#bic_id{name=Name} ->
-	    case maps:find(Name, Scope) of
-		error -> Expr;  %% global
-		{ok,New} -> Expr#bic_id{name=New}
-	    end;
-	#bic_constant{} -> Expr;
-	#bic_unary{arg=Arg} -> 
-	    Expr#bic_unary{arg=expr(Arg,Scope)};
-	#bic_binary{op=cast,arg1=Type,arg2=Arg} ->
-	    Expr#bic_binary{arg1=type(Type,Scope),
-			    arg2=expr(Arg,Scope)};
-	#bic_binary{arg1=Arg1,arg2=Arg2} ->
-	    Expr#bic_binary{arg1=expr(Arg1,Scope),
-			    arg2=expr(Arg2,Scope)};
-	#bic_call{func=Func,args=Args} ->
-	    Expr#bic_call{func=expr(Func,Scope),
-			  args=expr_list(Args,Scope)};
-	#bic_ifexpr{test=Test,then=Then,else=Else} ->
-	    Expr#bic_ifexpr{test=expr(Test,Scope),
-			    then=expr(Then,Scope),
-			    else=expr(Else,Scope)};
+fold(Fun, Acc0, Form) ->
+    case Form of
+	undefined ->
+	    {undefined,Acc0};
+	%% Expression
+	Const when is_number(Const) ->
+	    Fun(Form, Acc0);
+	#bic_id{} ->
+	    Fun(Form, Acc0);
+	#bic_constant{} ->
+	    Fun(Form,Acc0);
+	#bic_unary{arg=A} ->
+	    {A1,Acc1} = fold(Fun, Acc0, A),
+	    Form1 = Form#bic_unary{arg=A1},
+	    Fun(Form1,Acc1);
+	#bic_binary{arg1=A,arg2=B} ->
+	    {A1,Acc1} = fold(Fun, Acc0, A),
+	    {A2,Acc2} = fold(Fun, Acc1, B),
+	    Form1 = Form#bic_binary{arg1=A1,arg2=A2},
+	    Fun(Form1,Acc2);
+	#bic_call{args=As} ->
+	    {As1,Acc1} = fold_list(Fun,Acc0,As),
+	    Form1 = Form#bic_call{args=As1},
+	    Fun(Form1,Acc1);
+	#bic_ifexpr{test=C,then=T,else=E} ->
+	    {C1,Acc1} = fold(Fun, Acc0, C),
+	    {T1,Acc2} = fold(Fun,  Acc1, T),
+	    {E1,Acc3} = fold(Fun, E, Acc2),
+	    Form1 = Form#bic_ifexpr{test=C1,then=T1,else=E1},
+	    Fun(Form1,Acc3);
 	#bic_assign{lhs=Lhs, rhs=Rhs} ->
-	    Expr#bic_assign{lhs=expr(Lhs,Scope),
-			    rhs=expr(Rhs,Scope)}
+	    {Rhs1,Acc1} = fold(Fun, Acc0, Rhs),
+	    {Lhs1,Acc2} = fold(Fun, Acc1, Lhs),
+	    Form1 = Form#bic_assign{lhs=Lhs1,rhs=Rhs1},
+	    Fun(Form1,Acc2);
+	%% Types
+	#bic_typeid{} -> 
+	    Fun(Form,Acc0);
+	#bic_type{type=T} ->
+	    if is_atom(T) ->
+		    Fun(Form,Acc0);
+	       true ->
+		    {T1,Acc1} = Fun(T,Acc0),
+		    Form1 = Form#bic_type{type=T1},
+		    Fun(Form1,Acc1)
+	    end;
+	#bic_enum{} -> 
+	    Fun(Form,Acc0);
+	#bic_pointer{type=T} ->
+	    {T1,Acc1} = Fun(T,Acc0),
+	    Form1 = Form#bic_pointer{type=T1},
+	    Fun(Form1,Acc1);
+	#bic_array{type=T,dim=[]} ->
+	    {T1,Acc1} = Fun(T,Acc0),
+	    Form1 = Form#bic_array{type=T1},
+	    Fun(Form1,Acc1);
+	#bic_array{type=T,dim=D} ->
+	    {T1,Acc1} = Fun(T,Acc0),
+	    {D1,Acc2} = Fun(D,Acc1),
+	    Form1 = Form#bic_array{type=T1,dim=D1},
+	    Fun(Form1,Acc2);
+	#bic_struct{} -> %% FIXME: traverse
+	    Fun(Form,Acc0);
+	#bic_union{} -> %% FIXME: traverse
+	    Fun(Form,Acc0);
+	#bic_fn{} ->
+	    Fun(Form,Acc0);
+	%% DECLS
+	#bic_function{line=Line,type=T,params=Ps,body=B} ->
+	    {T1,Acc1} = fold(Fun, Acc0, T),
+	    {Ps1,Acc2} = fold_list(Fun, Acc1, Ps),
+	    {B1,Acc3} = fold_compound(Fun, Acc2, Line, B),
+	    Form1 = Form#bic_function{type=T1,params=Ps1,body=B1},
+	    Fun(Form1,Acc3);
+	#bic_decl{type=T,value=V} ->
+	    {T1,Acc1} = fold(Fun, Acc0, T),
+	    {V1,Acc2} = fold(Fun, Acc1, V),
+	    Form1 = Form#bic_decl{type=T1,value=V1},
+	    Fun(Form1,Acc2);
+	#bic_for{init=I,test=T,update=U,body=B} ->
+	    {I1,Acc1} = fold(Fun, Acc0, I),
+	    {T1,Acc2} = fold(Fun, Acc1, T),
+	    {U1,Acc3} = fold(Fun, Acc2, U),
+	    {B1,Acc4} = fold(Fun, Acc3, B),
+	    Form1 = Form#bic_for{init=I1,test=T1,update=U1,body=B1},
+	    Fun(Form1,Acc4);
+	%% STATEMENTS
+	#bic_while{test=C,body=B} ->
+	    {C1,Acc1} = fold(Fun, Acc0, C),
+	    {B1,Acc2} = fold(Fun, Acc1, B),
+	    Form1 = Form#bic_while{test=C1,body=B1},
+	    Fun(Form1,Acc2);
+	#bic_do{test=C,body=B} ->
+	    {B1,Acc1} = fold(Fun, Acc0, B),
+	    {C1,Acc2} = fold(Fun, Acc1, C),
+	    Form1 = Form#bic_do{test=C1,body=B1},
+	    Fun(Form1,Acc2);
+	#bic_if{test=C, then=T, else=E } ->
+	    {C1,Acc1} = fold(Fun, Acc0, C),
+	    {T1,Acc2} = fold(Fun, Acc1, T),
+	    {E1,Acc3} = fold(Fun, Acc2, E),
+	    Form1 = Form#bic_if{test=C1,then=T1,else=E1},
+	    Fun(Form1,Acc3);
+	#bic_switch{expr=E,body=B} ->
+	    {E1,Acc1} = fold(Fun, Acc0, E),
+	    {B1,Acc2} = fold(Fun, Acc1, B),
+	    Form1 = Form#bic_switch{expr=E1,body=B1},
+	    Fun(Form1,Acc2);
+	#bic_case{expr=E,code=B} ->
+	    {E1,Acc1} = fold(Fun, Acc0, E),
+	    {B1,Acc2} = fold(Fun, Acc1, B),
+	    Form1 = Form#bic_case{expr=E1,code=B1},
+	    Fun(Form1,Acc2);
+	#bic_default{code=B} ->
+	    {B1,Acc1} = fold(Fun, Acc0, B),
+	    Form1 = Form#bic_default{code=B1},
+	    Fun(Form1,Acc1);
+	#bic_label{code=B} ->
+	    {B1,Acc1} = fold(Fun, Acc0, B),
+	    Form1 = Form#bic_default{code=B1},
+	    Fun(Form1,Acc1);	    
+	#bic_goto{} ->
+	    Fun(Form,Acc0);
+	#bic_continue{} ->
+	    Fun(Form,Acc0);
+	#bic_break{} ->
+	    Fun(Form,Acc0);
+	#bic_return{expr=E} ->
+	    {E1,Acc1} = fold(Fun, Acc0, E),
+	    Form1 = Form#bic_return{expr=E1},
+	    Fun(Form1,Acc1);
+	#bic_empty{} ->
+	    Fun(Form,Acc0);
+	#bic_compound{line=Line,code=Stmts} when is_list(Stmts) ->
+	    {Stmts1,Acc1} = fold_compound(Fun,Acc0,Line,Stmts),
+	    Form1 = Form#bic_compound{code=Stmts1},
+	    Fun(Form1,Acc1);
+	_ when is_list(Form) -> %% alternate compound form, needed?
+	    Line = element(2,hd(Form)), %% is this the line number?
+	    {Form1,Acc1} = fold_compound(Fun,Acc0,Line,Form),
+	    Fun(Form1,Acc1);
+	_ ->
+	    {Form,Acc0}
     end.
 
-expr_list(ExprList, Scope) ->
-    [expr(Expr,Scope) || Expr <- ExprList].
+fold_compound(_Fun, Acc, _Line, undefined) -> %% undefine body, declaration
+    {undefined, Acc};
+fold_compound(Fun, Acc, Line, Stmts) when is_list(Stmts) ->
+    {_,Acc1} = Fun(#bic_begin{line=Line}, Acc),
+    {Stmts1, Acc2} = fold_list(Fun, Acc1, Stmts),
+    {_,Acc3} = Fun(#bic_end{line=Line}, Acc2),
+    {Stmts1, Acc3}.
 
-decl_list(Decls, Scope) ->
-    decl_list_(Decls, [], Scope).
+fold_list(Fun, Acc, As) ->
+    fold_list_(Fun, Acc, As, []).
 
-decl_list_([D|Ds], Acc, Scope) ->
-    {D1,Scope1} = decl(D, Scope),
-    decl_list_(Ds, [D1|Acc], Scope1);
-decl_list_([], Acc, Scope) ->
-    {lists:reverse(Acc), Scope}.
-
-decl(D,  Scope) ->
-    Old = D#bic_decl.name,
-    New = create_variable(),
-    {D#bic_decl{name=New}, Scope#{ Old => New }}.
-
-create_variable() ->
-    U = case get(unique) of
-	    undefined -> 0;
-	    U0 -> U0
-	end,
-    put(unique, U+1),
-    [$v|integer_to_list(U+1)].
-
-    
-	     
+fold_list_(Fun, Acc0, [A|As], As1) ->
+    {A1,Acc1} = fold(Fun,Acc0,A),
+    fold_list_(Fun,Acc1,As,[A1|As1]);
+fold_list_(_Fun, Acc0, [], As1) ->
+    {lists:reverse(As1), Acc0}.

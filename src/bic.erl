@@ -9,13 +9,15 @@
 -export([string/1, string/2]).
 -export([parse/1, parse/2]).
 -export([print/1, print/2]).
+-export([unique/1, unique/2]).
 
 -export([format_type/1]).
 -export([format_expr/1]).
 -export([format_exprs/1]).
 -export([format_decl/1]).
--export([format_statement/2]).
+-export([format_statement/1, format_statement/2]).
 -export([format_statements/2]).
+-export([format_definition/1]).
 -export([format_definitions/1]).
 -export([combine_types/2]).
 -export([complete_type/1]).
@@ -96,8 +98,8 @@ file(File) ->
 -spec file(Filename::string(), Env::cpp_options()) ->
 		  {ok, bic()} | {error, Reason::term()}.
 
-file(Filename,Env) ->
-    case parse(Filename, Env) of
+file(Filename,CppEnv) ->
+    case parse(Filename, CppEnv) of
 	{ok,Forms} ->
 	    case bic_lint:forms(Filename,Forms) of
 		{ok,_LintForms} ->
@@ -109,13 +111,25 @@ file(Filename,Env) ->
 	    Error
     end.
 
+
 print(Filename) ->
     print(Filename,[]).
 
-print(Filename, Env) ->
-    case file(Filename, Env) of
+print(Filename, CppEnv) ->
+    case file(Filename, CppEnv) of
 	{ok,Forms} ->
-	    Forms1 = bic_transform:variables(Forms),
+	    io:put_chars(format_definitions(Forms));
+	Error ->
+	    Error
+    end.
+
+unique(Filename) ->
+    unique(Filename,[]).
+
+unique(Filename, CppEnv) ->
+    case file(Filename, CppEnv) of
+	{ok,Forms} ->
+	    Forms1 = bic_transform:unique(Forms),
 	    io:put_chars(format_definitions(Forms1));
 	Error ->
 	    Error
@@ -270,34 +284,36 @@ format_type(undefined) -> "N";
 format_type('_') -> "_";
 format_type(#bic_typeid{name=Name}) -> Name;
 format_type(#bic_type{sign=S,const=C,volatile=V,size=Z,type=T}) ->
-    [if C -> "const "; true -> "" end,
-     if V -> "volatile "; true -> "" end,
-     case S of
-	 undefined -> "";
-	 signed -> "signed ";
-	 unsigned -> "unsigned "
-     end,
-     case Z of
-	 undefined -> "";
-	 short-> "short ";
-	 long -> "long ";
-	 long_long -> "long long "
-     end,
-     case T of
-	 undefined when S =/= undefined; Z =/= undefined -> "";
-	 undefined -> "U";
-	 '_' -> "T";
-	 void -> "void ";
-	 char -> "char";
-	 int -> "int";
-	 float -> "float";
-	 double -> "double";
-	 #bic_struct{} -> format_type(T);
-	 #bic_union{} -> format_type(T);
-	 #bic_typeid{name=Name} -> [Name];
-	 #bic_enum{} -> format_type(T);
-	 #bic_pointer{} -> ["(",format_type(T),")"]
-     end];
+    lists_join_no_empty(
+      " ",
+      [if C -> "const"; true -> "" end,
+       if V -> "volatile"; true -> "" end,
+       case S of
+	   undefined -> "";
+	   signed -> "signed";
+	   unsigned -> "unsigned"
+       end,
+       case Z of
+	   undefined -> "";
+	   short-> "short";
+	   long -> "long";
+	   long_long -> "long long"
+       end,
+       case T of
+	   undefined when S =/= undefined; Z =/= undefined -> "";
+	   undefined -> "U";
+	   '_' -> "T";
+	   void -> "void";
+	   char -> "char";
+	   int -> "int";
+	   float -> "float";
+	   double -> "double";
+	   #bic_struct{} -> format_type(T);
+	   #bic_union{} -> format_type(T);
+	   #bic_typeid{name=Name} -> [Name];
+	   #bic_enum{} -> format_type(T);
+	   #bic_pointer{} -> ["(",format_type(T),")"]
+       end]);
 format_type(#bic_enum{name=Name,elems=Es}) ->
     ["enum ",optional(Name)," {", format_enums(Es), "}"];
 
@@ -332,7 +348,10 @@ format_dim(_) ->
 
 optional(undefined) -> "";
 optional(String) when is_list(String) -> String.
-    
+
+%% join strings but remove empty elements first
+lists_join_no_empty(Sep,Es) ->
+    lists:join(Sep, [A || A <- Es, A =/= ""]).
 
 -type enum() :: {Name::string(),Line::integer(),Value::bic_expr()}.
 -spec format_enum(E::enum()) -> string().
@@ -373,8 +392,69 @@ format_params([]) -> [];
 format_params([X]) -> [format_decl(X)];
 format_params([X|Xs]) -> [format_decl(X),",",format_params(Xs)].
 
+-spec prio(Decl::bic_decl()|number()) -> integer();
+	  (Other::term()) -> false.
+
+%% check if tuple is and expression 
+%% return priority on success and false on failure
+prio(Const) when is_number(Const) -> 0;
+prio(#bic_constant{}) -> 0;
+prio(#bic_id{}) -> 0;
+prio(#bic_unary{op=Op}) ->
+    case Op of
+	'+++' -> 0;  %% postfix ++
+	'---' -> 0;  %% postfix --
+	'+' -> 5;
+	'-' -> 5;
+	'!' -> 5;
+	'~' -> 5;
+	'++' -> 6;   %% prefix
+	'--' -> 6;   %% prefix
+	'&' -> 7;
+	'*' -> 7
+    end;
+prio(#bic_binary{op=Op}) ->
+    case Op of
+	'[]' -> 0;
+	'*' -> 10;
+	'/' -> 10;
+	'%' -> 10;
+	'+' -> 20;
+	'-' -> 20;
+	'<<' -> 30;
+	'>>' -> 30;
+	'<' -> 40;
+	'<=' -> 40;
+	'>' -> 40;
+	'>=' -> 40;
+	'==' -> 50;
+	'!=' -> 50;
+	'&' -> 60;
+	'^' -> 70;
+	'|' -> 80;
+	'&&' -> 90;
+	'||' -> 100;
+	'='  -> 120;
+	'+='  -> 120;
+	'-='  -> 120;
+	'*='  -> 120;
+	'/='  -> 120;
+	'%='  -> 120;
+	'>>='  -> 120;
+	'<<='  -> 120;
+	'&='  -> 120;
+	'^='  -> 120;
+	'|='  -> 120;
+	','  -> 130
+    end;
+prio(#bic_ifexpr{}) -> 
+    110;
+prio(_) ->
+    false.
+
 -spec format_expr(Expr::bic_expr()) -> string().
 
+format_expr(X) when is_integer(X) -> integer_to_list(X);
 format_expr(#bic_id{name=Name}) -> Name;
 format_expr(#bic_constant{value=Value}) -> Value;
 
@@ -388,8 +468,20 @@ format_expr(#bic_binary{op='[]',arg1=Arg1,arg2=Arg2}) ->
     [format_expr(Arg1),"[",format_expr(Arg2),"]"];
 format_expr(#bic_binary{op=cast,arg1=Type,arg2=Arg2}) -> 
     ["(",format_type(Type),")",format_expr(Arg2)];    
-format_expr(#bic_binary{op=Op,arg1=Arg1,arg2=Arg2}) -> 
-    [format_expr(Arg1),atom_to_list(Op),format_expr(Arg2)];
+format_expr(X=#bic_binary{op=Op,arg1=Arg1,arg2=Arg2}) -> 
+    P  = prio(X),
+    P1 = prio(Arg1),
+    P2 = prio(Arg1),
+    [if is_number(P),is_number(P1),P1 > P -> 
+	     ["(",format_expr(Arg1), ")"];
+	true -> format_expr(Arg1)
+     end,
+     atom_to_list(Op),
+     if is_number(P),is_number(P2),P2 > P ->
+	     ["(",format_expr(Arg2), ")"];
+	true ->
+	     format_expr(Arg2)
+     end];
 format_expr(#bic_call{func=F, args=Exprs}) ->
     [format_expr(F),"(",format_exprs(Exprs),")"];
 format_expr(#bic_ifexpr{test=C,then=T,else=E}) ->
@@ -408,27 +500,37 @@ format_exprs([X|Xs]) -> [format_expr(X),",",format_exprs(Xs)].
 format_definitions([]) ->
     [];
 format_definitions([D|Ds]) ->
-    [case D of
-	#bic_function{name=Name,storage=Storage,type=Type,params=Params,body=Body} ->
-	     [format_storage(Storage),format_type(Type),format_dim(Type)," ",Name,
-	      "(",format_params(Params),")", "\n",
-	      format_statement(Body, 0)];
-	 #bic_typedef{name=Name,storage=Storage,type=Type,size=Size,value=_Init} ->
-	     ["typedef ", format_storage(Storage),format_type(Type),
-	      format_size(Size)," ",Name,format_dim(Type),";\n"];
-	 #bic_decl{} ->
-	     [format_decl(D),";\n"]
-     end | format_definitions(Ds)].
+    [format_definition(D) |
+     format_definitions(Ds)];
+format_definitions(D) ->
+    format_definition(D).
+
+format_definition(D) ->
+    case D of
+	#bic_function{name=Name,storage=Storage,type=Type,
+		      params=Params,body=Body} ->
+	    [format_storage(Storage),format_type(Type),format_dim(Type)," ",Name,
+	     "(",format_params(Params),")", "\n",
+	     format_statement(Body, 0)];
+	#bic_typedef{name=Name,storage=Storage,type=Type,size=Size,value=_Init} ->
+	    ["typedef ", format_storage(Storage),format_type(Type),
+	     format_size(Size)," ",Name,format_dim(Type),";\n"];
+	#bic_decl{} ->
+	    [format_decl(D),";\n"]
+    end.
 
 indent(I) when I =< 0 -> 
     "";
 indent(I) ->
     lists:duplicate(2*I, $\s).
 
-format_statement(Stmts, I) when is_list(Stmts) ->
-    ["{","\n",
-     format_statements(Stmts, I+1),
-     indent(I-1),"}\n"];
+format_statement(Stmt) ->
+    format_statement(Stmt, 0).
+
+format_statement(#bic_compound{code=Stmts}, I) when is_list(Stmts) ->
+    format_icompound(Stmts,I);
+format_statement(Stmts, I) when is_list(Stmts) -> %% allow list as compound?
+    format_icompound(Stmts,I);
 format_statement(Stmt, I) ->
     [indent(I),
      case Stmt of
@@ -481,12 +583,24 @@ format_statement(Stmt, I) ->
 	     [format_expr(Expr), ";\n"]
      end].
 
+format_body(#bic_compound{code=Stmts}, I) when is_list(Stmts) ->
+    format_compound(Stmts, I);
 format_body(Stmts, I) when is_list(Stmts) ->
-    ["{","\n",
-     format_statements(Stmts, I+1),
-     indent(I-1),"}\n"];
+    format_compound(Stmts, I);
 format_body(Stmt, I) ->
     ["\n", format_statement(Stmt,I)].
+
+%% compound body for for/while/...
+format_compound(Stmts, I) when is_list(Stmts) ->
+    ["{","\n",
+     format_statements(Stmts, I+1),
+     indent(I-1),"}\n"].
+
+%% compound body for block code, functions ...
+format_icompound(Stmts, I) when is_list(Stmts) ->
+    [indent(I),"{","\n",
+     format_statements(Stmts, I+1),
+     indent(I),"}\n"].
 
 format_statements([], _I) ->    
     [];

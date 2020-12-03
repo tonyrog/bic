@@ -164,9 +164,11 @@ forms_([F=#bic_function {line=Ln,name=Name} | Fs], Acc, S0) ->
     S40 = store_decl(Name, CDecl0, S3),
 
     %% {CParams,S3} = decls(F#bic_functions.params, S2),  %% merge?
-    {CBody,S4} = forms_(F#bic_function.body, [], clear_labels(S40)),
+    S41 = push_scope(S40),
+    {CBody,S42} = forms_(F#bic_function.body, [], clear_labels(S41)),
     %% CBody1 = resolve_labels(CBody, S4)
-    S5 = pop_scope(S4),
+    S43 = pop_scope(S42),
+    S5 = pop_scope(S43),
     Func = #cfunction { line=Ln, name=Name, return = CType,
 			args = CArgs, body = CBody },
     CDecl = #cdecl { line = Ln, name = Name, type = CType,
@@ -255,14 +257,20 @@ statement(#bic_return { line=Ln,expr = Expr}, S0) ->
     %% type_check(CExpr, Function Return Type)
     CReturn = #creturn { line=Ln, expr = CExpr },
     {CReturn, S1};
+statement(#bic_compound{code=Stmts}, S0) when is_list(Stmts) ->
+    compound(Stmts, [], S0);
 statement(Expr, S0) when is_tuple(Expr) ->
-    {CExpr,S1} = expr(Expr, S0),
-    {CExpr,S1};
-statement(StmtList, S0) when is_list(StmtList) ->
-    {CList,S1} = statement_list(StmtList, [], push_scope(S0)),
-    {CList,pop_scope(S1)};
+    expr(Expr, S0);
+statement(Stmts, S0) when is_list(Stmts) ->
+    compound(Stmts, [], S0);
 statement([], S0) ->
     {[], S0}.
+
+compound(Stmts, Acc, S0) ->
+    S1 = push_scope(S0),
+    {Stmts1,S2} = forms_(Stmts, Acc, S1),
+    S3 = pop_scope(S2),
+    {Stmts1,S3}.
 
 statement_list([Stmt|StmtList], Acc, S0) ->
     {CStmt, S1} = statement(Stmt, S0),

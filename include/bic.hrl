@@ -43,7 +43,7 @@
 	bic_break() |
 	bic_return() |
 	bic_empty() |
-	[ bic_statement() ]. %% compound statement
+	bic_compound().
 
 -type bic_declaration() ::
 	bic_decl() |
@@ -139,13 +139,18 @@
 -record(bic_constant,
 	{
 	  line :: integer(),
-	  base :: 8 | 10 | 16 | char | float | string,
+	  base :: 2 | 8 | 10 | 16 | char | float | string,
 	  value :: string()
 	}).
 -type bic_constant() :: #bic_constant{}.
 
--type unary_op() :: '&' | '*' | '+' | '-' | '~' | '!'.
-	  
+-type unary_op() :: 
+	'+++' | '---' | %% postfix
+	'+' | '-' |  '!' | '~' |
+	'++' | '--' |  %% prefix
+	'*' | '&'.
+%% cast (type) is using binary_op!
+
 -record(bic_unary,
 	{
 	 line :: integer(),
@@ -154,13 +159,19 @@
 	}).
 -type bic_unary() :: #bic_unary{}.
 
--type binary_op() :: 
-	'->' | '.' |
-	'++' | '--' | '=' |
-	'<<' | '>>' | '<' | '>' | '>=' | '<=' | '==' | '!=' |
-	'&&' | '||' |
-	'+' | '-' | '*' | '/' | '%' |
-	'&' | '|' | '^'.
+-type binary_op() ::
+	'[]' | '->' | '.' |
+	'*' | '/' | '%' |
+	'+' | '-' |
+	'<<' | '>>' |
+	 '<' | '>' | '>=' | '<=' |
+	'==' | '!=' |
+	'&' | 
+	'^' |
+	'|' | 
+	'&&' | 
+	'||' |
+	','.
 
 -record(bic_binary,
 	{
@@ -174,7 +185,7 @@
 -record(bic_call,
 	{
 	 line :: integer(),
-	 func :: bic_expr(),  %% typically #bic_constant{base=string}
+	 func :: bic_expr(),  %% typically #bic_id{name="foo"}
 	 args :: [bic_expr()]
 	}).
 -type bic_call() :: #bic_call{}.
@@ -190,7 +201,7 @@
 -type bic_ifexpr() :: #bic_ifexpr{}.
 
 -type assign_op() :: '=' | '*=' | '/=' | '%=' | '+=' | '-=' |
-		   '<<=' | '>>=' | '&=' | '^=' | '|='.
+		     '<<=' | '>>=' | '&=' | '^=' | '|='.
 
 -record(bic_assign,
 	{
@@ -217,7 +228,7 @@
 -record(bic_decl,
 	{
 	 line :: integer(),
-	 name :: string(),   %% name of type defined
+	 name :: string(),   %% name of element
 	 storage :: bic_storage(),
 	 type :: bic_type(),  %% type spec
 	 size :: bic_expr(),  %% optional constant bit field size
@@ -233,7 +244,7 @@
 	 storage :: bic_storage(), %% storage class specifier
 	 type :: bic_type(),       %% return type
 	 params :: [bic_decl()],   %% list of parameters
-	 body                      %% function body
+	 body   :: bic_compound()  %% function body
 	}).
 -type bic_function() :: #bic_function{}.
 
@@ -334,5 +345,28 @@
 	 line :: integer()
 	}).
 -type bic_empty() :: #bic_empty{}.
-	  
+
+-record(bic_compound,
+	{
+	 line :: integer(),
+	 code :: [bic_statement()]
+	}).
+
+-type bic_compound() ::
+	#bic_compound {} | [ bic_statement() ].
+
+%% begin/end mark compond ( { }  ) start and stop pairs in bic_transform
+
+-record(bic_begin,
+	{
+	 line :: integer()
+	}).
+-type bic_begin() :: #bic_begin{}.
+
+-record(bic_end,
+	{
+	 line :: integer()
+	}).
+-type bic_end() :: #bic_end{}.
+
 -endif.
