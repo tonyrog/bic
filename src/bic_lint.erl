@@ -480,13 +480,22 @@ expr(#bic_id { line=Ln, name=Name }, S0) ->
 	    CVar = #cvar { line=Ln, id=Name, type=CDecl#cdecl.type },
 	    {CVar, S0}
     end;
+expr(#bic_unary { line=Ln, op=sizeof, arg=Type }, S0) ->
+    {CArg,S1} = try expr(Type, S0) of
+		    ExprR -> ExprR
+		catch
+		    error:_ ->
+			type(Type,Ln,S0)
+		end,
+    {#cunary{line=Ln, op=sizeof, arg=CArg }, S1};
 expr(#bic_unary { line=Ln, op=Op, arg=Arg}, S0) ->
     {CArg,S1} = expr(Arg,S0),
     {CType,S2} = check_type(Ln,Op,typeof(CArg),S1),
     {#cunary { line=Ln, op=Op, type=CType, arg=CArg }, S2};
 expr(#bic_binary { line=Ln, op=cast, arg1=Type, arg2=Arg2}, S0) ->
     {CArg2,S1} = expr(Arg2,S0),
-    {#cbinary { line=Ln, op=cast,type=Type,arg1=Type,arg2=CArg2}, S1};
+    {CType,S2} = type(Type,Ln,S1),
+    {#cbinary { line=Ln, op=cast,type=CType,arg1=CType,arg2=CArg2}, S2};
 expr(#bic_binary { line=Ln, op=Op, arg1=Arg1, arg2=Arg2}, S0) ->
     {CArg1,S1} = expr(Arg1,S0),
     {CArg2,S2} = expr(Arg2,S1),

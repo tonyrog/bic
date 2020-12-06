@@ -36,7 +36,7 @@ Terminals
 	  '-=' '<<=' '>>=' '&=' '^=' '|=' 
 	  '(' ')' '[' ']' '{' '}' ',' '.' '&' '*' '+' '-' '~' '!'
 	  '/' '%' '^' '|' ':' '?' '=' ';'
-	  'typedef' 'extern' 'static' 'auto' 'register'
+	  'typedef' 'extern' 'static' 'inline' 'auto' 'register'
 	  'char' 'short' 'int' 'long' 'signed' 'unsigned' 'float' 'double' 
 	  'const' 'volatile' 'void'
 	  'struct' 'union' 'enum' '...'
@@ -225,6 +225,7 @@ init_declarator -> declarator ':' constant_expr '=' initializer :
 
 storage_class_specifier -> 'extern'   : op('$1').
 storage_class_specifier -> 'static'   : op('$1').
+storage_class_specifier -> 'inline'   : op('$1').
 storage_class_specifier -> 'auto'     : op('$1').
 storage_class_specifier -> 'register' : op('$1'). 
 storage_class_specifier -> 'typedef'  : put(bic_is_typedef, true), undefined.
@@ -296,7 +297,7 @@ enum_specifier -> 'enum' identifier :
 enumerator_list -> enumerator : ['$1'].
 enumerator_list -> enumerator_list ',' enumerator : '$1'++['$3'].
 
-enumerator -> identifier : { arg('$1'),undefined}.
+enumerator -> identifier : { arg('$1'),line('$1'),undefined}.
 enumerator -> identifier '=' constant_expr : {arg('$1'),line('$1'),'$3'}.
 
 declarator -> declarator2 : '$1'.

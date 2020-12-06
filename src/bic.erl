@@ -75,12 +75,12 @@ string(String, Env) ->
 	    bic_cpp:close(Fd),
 	    case Res of 
 		{error,{{Fn,Ln},Mod,Message}} when is_integer(Ln) ->
-		    io:format("Message: ~w\n", [Message]),
+		    %% io:format("Message: ~w\n", [Message]),
 		    io:format("~s:~w: ~s\n",
 			      [Fn,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
 		{error,{Ln,Mod,Message}} when is_integer(Ln) ->
-		    io:format("Message: ~w\n", [Message]),
+		    %% io:format("Message: ~w\n", [Message]),
 		    io:format("~s:~w: ~s\n",
 			      ["*string*",Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
@@ -153,12 +153,12 @@ parse(Filename, Env) ->
 	    bic_cpp:close(Fd),
 	    case Res of 
 		{error,{{Fn,Ln},Mod,Message}} when is_integer(Ln) ->
-		    io:format("Message: ~w\n", [Message]),
+		    %% io:format("Message: ~w\n", [Message]),
 		    io:format("~s:~w: ~s\n",
 			      [Fn,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
 		{error,{Ln,Mod,Message}} when is_integer(Ln) ->
-		    io:format("Message: ~w\n", [Message]),
+		    %% io:format("Message: ~w\n", [Message]),
 		    io:format("~s:~w: ~s\n",
 			      [Filename,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};

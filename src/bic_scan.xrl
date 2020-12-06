@@ -32,6 +32,7 @@ for		: {token,{for,TokenLine}}.
 goto		: {token,{goto,TokenLine}}.
 if		: {token,{'if',TokenLine}}.
 int		: {token,{int,TokenLine}}.
+inline		: {token,{inline,TokenLine}}.
 long		: {token,{long,TokenLine}}.
 register	: {token,{register,TokenLine}}.
 return	        : {token,{return,TokenLine}}.
