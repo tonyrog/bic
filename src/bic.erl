@@ -492,6 +492,9 @@ prio(#bic_constant{}) -> 0;
 prio(#bic_id{}) -> 0;
 prio(#bic_unary{op=Op}) ->
     case Op of
+	sizeof -> 0;
+	typeof -> 0;
+	cast -> 0;
 	'+++' -> 0;  %% postfix ++
 	'---' -> 0;  %% postfix --
 	'+' -> 5;
@@ -552,6 +555,15 @@ format_expr(#bic_unary{op='+++',arg=Arg}) ->
     [format_expr(Arg),"++"];
 format_expr(#bic_unary{op='---',arg=Arg}) -> 
     [format_expr(Arg),"--"];
+format_expr(#bic_unary{op=sizeof,arg=Arg}) -> 
+    %% fixme: Arg is either expression or type!
+    ["sizeof(", 
+     try format_expr(Arg) of
+	 X -> X
+     catch
+	 error:_ ->
+	     format_type(Arg)
+     end, ")"];
 format_expr(#bic_unary{op=Op,arg=Arg}) -> 
     [atom_to_list(Op),format_expr(Arg)];
 format_expr(#bic_binary{op='[]',arg1=Arg1,arg2=Arg2}) -> 

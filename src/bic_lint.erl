@@ -391,12 +391,12 @@ expr(X=#bic_id { line=Ln, name=Name }, S0) ->
 	    %% io:format("decl of ~s = ~p\n", [Name, CDecl]),
 	    { X#bic_id { type=CDecl#bic_decl.type }, S0}
     end;
-expr(X=#bic_unary { line=Ln, op=sizeof, arg=Type }, S0) ->
-    {SzArg,S2} = try expr(Type, S0) of
+expr(X=#bic_unary { line=Ln, op=sizeof, arg=Arg }, S0) ->
+    {SzArg,S2} = try expr(Arg, S0) of
 		     {X1,S1} -> {typeof(X1), S1}
 		 catch
 		     error:_ ->
-			 type(Type,Ln,S0)
+			 type(Arg,Ln,S0)
 		 end,
     {X#bic_unary{ type=sizeof_type(Ln), arg=SzArg }, S2};
 expr(X=#bic_unary { line=Ln, op=typeof, arg=Type }, S0) ->
@@ -439,7 +439,10 @@ expr(X=#bic_ifexpr { line=Ln, test=Test, then=Then, else=Else}, S0) ->
     %% CThen and CElse must be compatible
     %% {CType,S3} = check_type(Op,CTest,CElse,S3),
     {CType,S4} = check_type(Ln,'==',CThen,CElse,S3),
-    {X#bic_ifexpr { type=CType, test=CTest, then=CThen, else=CElse}, S4}.
+    {X#bic_ifexpr { type=CType, test=CTest, then=CThen, else=CElse}, S4};
+expr(Xs, S0) when is_list(Xs) ->
+    expr_list(Xs, S0).
+
 
 expr_list(Xs,S0) ->
     expr_list_(Xs,S0,[]).
@@ -613,9 +616,9 @@ is_array_type(_) -> false.
 is_pointer_type(#bic_pointer{}) -> true;
 is_pointer_type(_) -> false.
 
-%% fixme:
 sizeof_type(Ln) ->
-    #bic_type{ line=Ln, sign=unsigned, const=true, size=long, type=int}.
+    %% #bic_type{ line=Ln, sign=unsigned, const=true, size=long, type=int}.
+    #bic_typeid { line=Ln, name="size_t"}.
 
 typeof_list(Ts) ->
     [typeof(T) || T <- Ts].
