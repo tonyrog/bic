@@ -43,6 +43,7 @@ static		: {token,{static,TokenLine}}.
 struct		: {token,{struct,TokenLine}}.
 switch		: {token,{switch,TokenLine}}.
 typedef		: {token,{typedef,TokenLine}}.
+typeof		: {token,{typeof,TokenLine}}.
 union		: {token,{union,TokenLine}}.
 unsigned	: {token,{unsigned,TokenLine}}.
 void		: {token,{void,TokenLine}}.

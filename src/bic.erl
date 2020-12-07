@@ -21,8 +21,10 @@
 -export([format_definitions/1]).
 -export([combine_types/2]).
 -export([complete_type/1]).
--export([constant_to_integer/2]).
--export([constant_to_float/1]).
+-export([token_to_integer/2]).
+-export([token_to_float/1]).
+-export([token_to_string/1]).
+-export([token_to_char/1]).
 
 -compile(export_all).
 
@@ -102,15 +104,14 @@ file(Filename,CppEnv) ->
     case parse(Filename, CppEnv) of
 	{ok,Forms} ->
 	    case bic_lint:forms(Filename,Forms) of
-		{ok,_LintForms} ->
-		    {ok,Forms};
+		{ok,LintForms} ->
+		    {ok,LintForms};
 		Err={error,_} ->
 		    Err
 	    end;
 	Error ->
 	    Error
     end.
-
 
 print(Filename) ->
     print(Filename,[]).
@@ -207,8 +208,6 @@ complete_type(A=#bic_union{elems=Ds}) ->
     A#bic_union{elems=[D#bic_decl{type=complete_type(D#bic_decl.type)} 
 		       || D <- Ds]};
 complete_type(A) -> A.
-	    
-
     
 
 combine_types(T1,T2) ->
@@ -611,10 +610,27 @@ format_statements([Stmt|Stmts], I) ->
      format_statements(Stmts, I)].
 
 %% convert constants
-constant_to_integer(String, Base) ->
-    list_to_integer(string:trim(String,trailing,"uUlL"), Base).
+token_to_integer([$0,$x|Value], 16) ->
+    {list_to_integer(string:trim(Value,trailing,"uUlL"), 16), int};
+token_to_integer([$0,$X|Value], 16) ->
+    {list_to_integer(string:trim(Value,trailing,"uUlL"), 16), int};
+token_to_integer([$0,$b|Value], 2) ->
+    {list_to_integer(string:trim(Value,trailing,"uUlL"), 2), int};
+token_to_integer([$0,$B|Value], 2) ->
+    {list_to_integer(string:trim(Value,trailing,"uUlL"), 2), int};
+token_to_integer([$0|Value], 8) ->
+    {list_to_integer(string:trim(Value,trailing,"uUlL"), 8), int};
+token_to_integer(Value, 10) ->
+    {list_to_integer(string:trim(Value,trailing,"uUlL"), 10), int}.
 
-constant_to_float(String) ->
-    list_to_float(string:trim(String,trailing,"fFlL")).
+%% fixme: handle suffix
+token_to_float(String) ->
+    {list_to_float(string:trim(String,trailing,"fFlL")), double}.
 
+%% return char/wchar_t
+token_to_char([$',Val,$']) ->
+    {Val, char}.
 
+%% fixme: check for utf8 interpret escape seqeunces
+token_to_string(Token) ->
+    {Token, char}.

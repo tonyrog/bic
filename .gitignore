@@ -1,0 +1,3 @@
+.*.d
+bic_parse.erl
+bic_scan.erl

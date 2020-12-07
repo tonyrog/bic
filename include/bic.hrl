@@ -72,6 +72,7 @@
 	 sign      :: bic_sign(),
 	 const     :: undefined | boolean(),
 	 volatile  :: undefined | boolean(),
+	 inline    :: undefined | boolean(),
 	 size      :: bic_size(),
 	 type      :: undefined | '_' | void | char | int | float | double |
 		      bic_struct() | bic_union() | bic_typeid() | bic_enum() |
@@ -130,17 +131,20 @@
 
 
 -record(bic_id,
-	{ 
-	  line :: integer(),
-	  name :: string()
+	{
+	 line :: integer(),
+	 type :: bic_type(),
+	 name :: string()
 	}).
 -type bic_id() :: #bic_id{}.
-		    
+
 -record(bic_constant,
 	{
-	  line :: integer(),
-	  base :: 2 | 8 | 10 | 16 | char | float | string,
-	  value :: string()
+	 line :: integer(),
+	 type :: bic_type(),
+	 base :: 2 | 8 | 10 | 16 | char | float | string,
+	 value :: number(), %% interpreted value
+	 token :: string()
 	}).
 -type bic_constant() :: #bic_constant{}.
 
@@ -154,6 +158,7 @@
 -record(bic_unary,
 	{
 	 line :: integer(),
+	 type :: bic_type(),
 	 op   :: unary_op(),
 	 arg  :: bic_expr()
 	}).
@@ -176,6 +181,7 @@
 -record(bic_binary,
 	{
 	 line :: integer(),
+	 type :: bic_type(),
 	 op   :: binary_op(),
 	 arg1 :: bic_expr(),
 	 arg2 :: bic_expr()
@@ -185,6 +191,7 @@
 -record(bic_call,
 	{
 	 line :: integer(),
+	 type :: bic_type(),
 	 func :: bic_expr(),  %% typically #bic_id{name="foo"}
 	 args :: [bic_expr()]
 	}).
@@ -194,6 +201,7 @@
 -record(bic_ifexpr,
 	{
 	 line :: integer(),
+	 type :: bic_type(),
 	 test :: bic_expr(),
 	 then :: bic_expr(),
 	 else :: bic_expr()
@@ -206,6 +214,7 @@
 -record(bic_assign,
 	{
 	 line :: integer(),
+	 type :: bic_type(),
 	 op   :: assign_op(),
 	 lhs  :: bic_expr(),
 	 rhs  :: bic_expr()

@@ -30,7 +30,7 @@ Nonterminals
 
 Terminals 
 	  hexnum octnum binnum decnum flonum chrnum
-	  identifier string sizeof type
+	  identifier string sizeof typeof type
 	  '->' '++' '--' '<<' '>>' '<' '>' '>=' '<=' '==' '!='
 	  '&&' '||' '*=' '/=' '%=' '+='
 	  '-=' '<<=' '>>=' '&=' '^=' '|=' 
@@ -83,6 +83,10 @@ unary_expr -> 'sizeof' unary_expr :
 		  #bic_unary {line=line('$1'),op='sizeof',arg='$2'}.
 unary_expr -> 'sizeof' '(' type_name ')' : 
 		  #bic_unary {line=line('$1'),op='sizeof',arg='$3'}.
+unary_expr -> 'typeof' unary_expr :
+		  #bic_unary {line=line('$1'),op='typeof',arg='$2'}.
+unary_expr -> 'typeof' '(' type_name ')' :
+		  #bic_unary {line=line('$1'),op='typeof',arg='$3'}.
 
 unary_operator -> '&' : '$1'.
 unary_operator -> '*' : '$1'.
@@ -225,7 +229,6 @@ init_declarator -> declarator ':' constant_expr '=' initializer :
 
 storage_class_specifier -> 'extern'   : op('$1').
 storage_class_specifier -> 'static'   : op('$1').
-storage_class_specifier -> 'inline'   : op('$1').
 storage_class_specifier -> 'auto'     : op('$1').
 storage_class_specifier -> 'register' : op('$1'). 
 storage_class_specifier -> 'typedef'  : put(bic_is_typedef, true), undefined.
@@ -241,6 +244,7 @@ type_specifier -> 'signed'   : #bic_type{line=line('$1'),sign=signed}.
 type_specifier -> 'unsigned' : #bic_type{line=line('$1'),sign=unsigned}.
 type_specifier -> 'const'    : #bic_type{line=line('$1'),const=true}.
 type_specifier -> 'volatile' : #bic_type{line=line('$1'),volatile=true}.
+type_specifier -> 'inline'   : #bic_type{line=line('$1'),inline=true}.
 type_specifier -> struct_or_union_specifier : '$1'.
 type_specifier -> enum_specifier : '$1'.
 type_specifier -> type : typeid('$1').
@@ -534,25 +538,25 @@ typeid({type,Line,Name}) ->
     #bic_typeid { line=Line, name=Name}.
 
 bin({binnum,Line,Val}) ->
-    #bic_constant { line=Line, base=2, value=Val}.
+    #bic_constant { line=Line, base=2, token=Val}.
     
 oct({octnum,Line,Val}) ->
-    #bic_constant { line=Line, base=8, value=Val}.
+    #bic_constant { line=Line, base=8, token=Val}.
 
 hex({hexnum,Line,Val}) ->
-    #bic_constant { line=Line, base=16, value=Val}.
+    #bic_constant { line=Line, base=16, token=Val}.
 
 dec({decnum,Line,Val}) ->
-    #bic_constant { line=Line, base=10, value=Val}.
+    #bic_constant { line=Line, base=10, token=Val}.
 
 chr({chrnum,Line,Val}) ->
-    #bic_constant { line=Line, base=char, value=Val}.
+    #bic_constant { line=Line, base=char, token=Val}.
 
 flo({flonum,Line,Val}) ->
-    #bic_constant { line=Line, base=float, value=Val}.
+    #bic_constant { line=Line, base=float, token=Val}.
 
 str({string,Line,Val}) ->
-    #bic_constant { line=Line, base=string, value=Val}.
+    #bic_constant { line=Line, base=string, token=Val}.
 
 %% Handle typedef declaration (very) special
 decl(D) ->

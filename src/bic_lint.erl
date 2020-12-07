@@ -11,98 +11,15 @@
 
 -include("../include/bic.hrl").
 
--record(cconst,    { line, value, type }).
--record(cvar,      { line, id, type }).
--record(cbinary,   { line, op, type, arg1, arg2 }).
--record(cunary,    { line, op, type, arg }).
--record(ccall,     { line, func, type, args }).
--record(cassign,   { line, op, type, lhs, rhs }).
--record(cifexpr,   { line, test, type, then, else}).
-
--type cexpr() :: #cassign{} | #cifexpr{} | #cbinary{} | 
-		 #cunary{} | #ccall{} | #cconst{}.
--type cdecl() :: any(). %% forward - #cdecl{}.
-
--record(cstruct,
-	{
-	  line,
-	  name   = undefined :: undefined | string(), %% optional name
-	  elems  = [] :: [cdecl()]       %% declarations
-	}).
-
--record(cunion,
-	{
-	  line,
-	  name   = undefined :: undefined | string(), %% optional name
-	  elems  = [] :: [cdecl()]       %% declarations
-	}).
-
--record(cenum,
-	{
-	  line,
-	  name   = undefined :: undefined | string(), %% optional name
-	  elems  = [] :: [{string(),integer()}]       %% value
-	}).
-
--record(cfunction,
-	{
-	  line,
-	  name = undefined :: undefined | string(), %% optional name
-	  return,
-	  args,
-	  body
-	}).
-
--record(cempty,    {line}).
--record(cbreak,    {line}).
--record(ccontinue, {line}).
--record(cdefault,  {line}).
--record(creturn, {line,expr}).
--record(cfor,     {line,init,test,update,body}).
--record(cwhile,   {line,test,body}).
--record(cdo,      {line,body,test}).
--record(clabel,	  {line,name,code}).
--record(cgoto,    {line,label}).
--record(ccase,    {line, expr, code}).
--record(cswitch,  {line, expr, body}).
--record(cif, {line, test,then,else}).
-
--record(ctype,
-	{
-	 line       = 0 :: integer(), %% where type was first defined!
-	 sign       = default :: default | signed | unsigned,
-	 const      = default :: default | boolean(),
-	 volatile   = default :: default | boolean(),
-	 size       = default :: default | none | short | long | long_long,
-	 type       = default :: default | void | char | int | float | double
-	}).
-
--record(cdecl,
-       {
-	line,
-	name = undefined :: undefined | string(),
-	type = undefined :: undefined | #ctype{},
-	size = undefined :: undefined | integer(),
-	value = undefined :: undefined | cexpr()
-       }).
-
--record(ctypedef,
-	{
-	 line,
-	 name = undefined :: undefined | string(),
-	 type = undefined :: undefined | #ctype{},
-	 size = undefined :: undefined | integer(),
-	 value = undefined :: undefined | cexpr()
-	}).
-
 -type scopetype() :: compound | for | while | do | switch.
 
--type typemap() :: #{ string() => #ctypedef{}}.
--type declmap() :: #{ string() => #cdecl{}}.
+-type typemap() :: #{ string() => bic_typedef()}.
+-type declmap() :: #{ string() => bic_decl()}.
 
 -record(scope,
 	{
 	 filename = "" :: string(),  %% filename 
+	 func          :: undefined | bic_function(),
 	 type     = [] :: [scopetype()],
 	 typedefs = [] :: [typemap()], %% stack of typedefs
 	 decls    = [] :: [declmap()], %% stack of declarations
@@ -151,98 +68,92 @@ forms_([F=#bic_enum{}|Fs], Acc, S0) ->
     {CEnum, S1} = enum(F, S0),
     forms_(Fs, [CEnum|Acc], S1);
 forms_([F=#bic_function {line=Ln,name=Name} | Fs], Acc, S0) ->
-    %% io:format("return = ~p\n", [F#bic_function.type]),
     {CType,S1} = type(F#bic_function.type,Ln,S0),
     S2 = push_scope(S1),
     {CArgs,S3} = decls(F#bic_function.params, S2),
 
-    %% declare for recursive functions
-    Func0 = #cfunction { line=Ln, name=Name, return = CType,
-			 args = CArgs, body = undefined },
-    CDecl0 = #cdecl { line = Ln, name = Name, type = CType,
-		      value = Func0 },
-    S40 = store_decl(Name, CDecl0, S3),
-
+    %% declare F for recursive functions
+    Func0 = F#bic_function { type=CType, params=CArgs, body=undefined },
+    CDecl0 = #bic_decl { line = Ln, name = Name, type = CType, value = Func0 },
+    S400 = store_decl(Name, CDecl0, S3),
+    S40 = S400#scope{ func = Func0 }, %% current function
     %% {CParams,S3} = decls(F#bic_functions.params, S2),  %% merge?
     S41 = push_scope(S40),
     {CBody,S42} = forms_(F#bic_function.body, [], clear_labels(S41)),
     %% CBody1 = resolve_labels(CBody, S4)
     S43 = pop_scope(S42),
     S5 = pop_scope(S43),
-    Func = #cfunction { line=Ln, name=Name, return = CType,
-			args = CArgs, body = CBody },
-    CDecl = #cdecl { line = Ln, name = Name, type = CType,
-		     value = Func },
+    Func = F#bic_function { type=CType, params=CArgs, body=CBody },
+    CDecl = #bic_decl { line=Ln, name=Name, type=CType, value=Func },
     S6 = store_decl(Name, CDecl, S5),
-    forms_(Fs, [Func | Acc], S6);
+    forms_(Fs, [Func | Acc], S6#scope{ func=undefined} );
 forms_([F | Fs], Acc, S) ->
     {CStmt, S1} = statement(F, S),
     forms_(Fs, [CStmt|Acc], S1);
 forms_([], Acc, S) ->
     {lists:reverse(Acc), S}.
 
-statement(#bic_empty{line=Ln}, S) ->
-    {#cempty{line=Ln}, S};
+statement(Y=#bic_empty{}, S) ->
+    {Y, S};
 statement(#bic_if { line=Ln,test=Test,then=Then,else=Else},S0) ->
     {CTest,S1} = expr(Test,S0),
     {CThen,S2} = forms_(Then,[],S1),
     {CElse,S3} = forms_(Else,[],S2),
-    CIf = #cif { line=Ln,test=CTest, then=CThen, else=CElse },
+    CIf = #bic_if { line=Ln,test=CTest, then=CThen, else=CElse },
     {CIf,S3};
-statement(#bic_for { line=Ln,init=Init,test=Test,update=Update,body=Body},S0) ->
+statement(Y=#bic_for{ init=Init,test=Test,update=Update,body=Body},S0) ->
     {CInit,S1} = expr(Init,S0),
     {CTest,S2} = expr(Test,S1),
     {CUpdate,S3} = expr(Update,S2),
     {CBody,S4} = forms_(Body,[],push_scope(S3,for)),
-    CFor = #cfor { line=Ln,init=CInit,test=CTest,update=CUpdate,body=CBody},
+    CFor = Y#bic_for { init=CInit,test=CTest,update=CUpdate,body=CBody},
     {CFor,pop_scope(S4)};
-statement(#bic_while { line=Ln, test=Test, body=Body },S0) ->
+statement(Y=#bic_while { test=Test, body=Body },S0) ->
     {CTest,S1} = expr(Test,S0),
     {CBody,S2} = forms_(Body,[],push_scope(S1,while)),
-    CWhile = #cwhile { line=Ln,test=CTest,body=CBody},
+    CWhile = Y#bic_while { test=CTest,body=CBody},
     {CWhile,pop_scope(S2)};
-statement(#bic_do { line=Ln, body=Body, test=Test },S0) ->
+statement(Y=#bic_do { body=Body, test=Test },S0) ->
     {CTest,S1} = expr(Test,S0),
     {CBody,S2} = forms_(Body,[],push_scope(S1,do)),
-    CWhile = #cdo { line=Ln, body=CBody, test=CTest },
+    CWhile = Y#bic_do { body=CBody, test=CTest },
     {CWhile,pop_scope(S2)};
-statement(#bic_switch { line=Ln, expr=Expr, body=Body },S0) ->
+statement(Y=#bic_switch { expr=Expr, body=Body },S0) ->
     {CExpr,S1} = expr(Expr,S0),
     {CBody,S2} = forms_(Body,[],push_scope(S1,switch)),
-    CSwitch = #cswitch { line=Ln, expr=CExpr, body=CBody },
+    CSwitch = Y=#bic_switch { expr=CExpr, body=CBody },
     {CSwitch,pop_scope(S2)};
-statement(#bic_label { line=Ln, name = Name, code = Code }, S0) ->
+statement(Y=#bic_label { name = Name, code = Code }, S0) ->
     {CCode,S1} = forms_(Code,[],S0),
     S1 = add_label(Name, S0),
-    CLabel = #clabel { line=Ln, name=Name, code=CCode },
+    CLabel = Y#bic_label { code=CCode },
     {CLabel, S1};
-statement(#bic_case { line=Ln, expr = Expr, code = Code }, S0) ->
+statement(Y=#bic_case { expr = Expr, code = Code }, S0) ->
     {CExpr,S1} = expr(Expr,S0),
     {CCode,S2} = forms_(Code,[],S1),
-    CCase = #ccase { line=Ln, expr=CExpr, code=CCode },
+    CCase = Y#bic_case { expr=CExpr, code=CCode },
     {CCase, S2};
-statement(#bic_goto { line=Ln, label=Name }, S0) ->
+statement(Y=#bic_goto { label=_Name }, S0) ->
     %% FIXME: resolve goto's later, may have forward refs!
-    CGoto = #cgoto { line=Ln, label=Name },
+    CGoto = Y,
     {CGoto, S0};
-statement(#bic_continue {line=Ln}, S0) ->
+statement(Y=#bic_continue {line=Ln}, S0) ->
     S1 = case is_scope_type([for,while,do],S0) of
 	     false ->
 		 add_error(S0,Ln,"continue statement not within a loop", []);
 	     true -> S0
 	 end,
-    CContinue = #ccontinue {line=Ln}, 
+    CContinue = Y,
     {CContinue, S1};
-statement(#bic_break {line=Ln}, S0) ->
+statement(Y=#bic_break {line=Ln}, S0) ->
     S1 = case is_scope_type([for,while,do,switch],S0) of
 	     false -> 
 		 add_error(S0,Ln,
 			   "break statement not within loop or switch", []);
 	     true -> S0
 	 end,
-    CBreak = #cbreak {line=Ln},
-    {CBreak, S1};
-statement(#bic_default {line=Ln}, S0) ->
+    {Y, S1};
+statement(Y=#bic_default {line=Ln}, S0) ->
     S1 = case is_scope_type([switch],S0) of
 	     false -> 
 		 add_error(S0, Ln,
@@ -250,21 +161,28 @@ statement(#bic_default {line=Ln}, S0) ->
 			   []);
 	     true -> S0
 	 end,
-    CDefault = #cdefault {line=Ln},
-    {CDefault, S1};
-statement(#bic_return { line=Ln,expr = Expr}, S0) ->
+    {Y, S1};
+statement(Y=#bic_return { line=Ln,expr=Expr}, S0) ->
     {CExpr,S1} = expr(Expr,S0),
-    %% type_check(CExpr, Function Return Type)
-    CReturn = #creturn { line=Ln, expr = CExpr },
+    F = S0#scope.func,
+    S1 = 
+	if F =:= undefined ->
+		add_error(S0, Ln,
+			  "return statement not in a function",
+			  []); 
+	   true ->
+		{_CType,S2}=check_type(Ln,'==',typeof(CExpr),
+				       F#bic_function.type,S0),
+		S2
+	end,
+    CReturn = Y#bic_return { expr = CExpr },
     {CReturn, S1};
-statement(#bic_compound{code=Stmts}, S0) when is_list(Stmts) ->
-    compound(Stmts, [], S0);
+statement(Y=#bic_compound{code=Stmts}, S0) ->
+    {Stmts1,S1} = compound(Stmts, [], S0),
+    {Y#bic_compound{code=Stmts1}, S1};
 statement(Expr, S0) when is_tuple(Expr) ->
-    expr(Expr, S0);
-statement(Stmts, S0) when is_list(Stmts) ->
-    compound(Stmts, [], S0);
-statement([], S0) ->
-    {[], S0}.
+    expr(Expr, S0).
+
 
 compound(Stmts, Acc, S0) ->
     S1 = push_scope(S0),
@@ -287,15 +205,14 @@ typedef(D=#bic_typedef{line=Ln}, S0) ->
     {CType,S1} = type(D#bic_typedef.type,Ln,S0),
     {Size,S2}  = expr(D#bic_typedef.size, S1),
     {Value,S3} = expr(D#bic_typedef.value,S2),
-    {#ctypedef { line=Ln,name=D#bic_typedef.name,
-		 type=CType,size=Size,value=Value},S3}.
+    {D#bic_typedef { line=Ln, type=CType,size=Size,value=Value},S3}.
 
 decl(D=#bic_decl{line=Ln}, S0) ->
     {Type,S1}  = type(D#bic_decl.type,Ln,S0),
     {Size,S2}  = expr(D#bic_decl.size, S1),
     {Value,S3} = expr(D#bic_decl.value,S2),
     Name = D#bic_decl.name,
-    CDecl = #cdecl { line=Ln,name=Name, type=Type, size=Size, value=Value },
+    CDecl = D#bic_decl { type=Type, size=Size, value=Value },
     S4 = if Name =:= undefined -> 
 		 S3;
 	    true ->
@@ -322,7 +239,7 @@ struct(X=#bic_struct{line=Ln},S0) ->
     {Elems,S00} = decls(X#bic_struct.elems, push_scope(S0)),
     S1 = pop_scope(S00),
     Name = X#bic_struct.name,
-    CStruct = #cstruct { line=Ln, name=Name, elems=Elems},
+    CStruct = X#bic_struct { name=Name, elems=Elems},
     if Name =:= undefined ->
 	    {CStruct, S1};
        true ->
@@ -337,12 +254,11 @@ struct(X=#bic_struct{line=Ln},S0) ->
 	    end
     end.
 
-
 union(X=#bic_union{line=Ln},S0) ->
     {Elems,S00} = decls(X#bic_union.elems, push_scope(S0)),
     S1 = pop_scope(S00),
     Name = X#bic_union.name,
-    CUnion = #cunion { line=Ln,name=Name, elems=Elems},
+    CUnion = X#bic_union { name=Name, elems=Elems},
     if Name =:= undefined ->
 	    {CUnion, S1};
        true ->
@@ -360,7 +276,7 @@ union(X=#bic_union{line=Ln},S0) ->
 enum(X=#bic_enum{line=Ln},S0) ->
     {Elems,S1} = enums(X#bic_enum.elems, S0),
     Name = X#bic_enum.name,
-    CEnum = #cenum { line=Ln,name=Name, elems=Elems },
+    CEnum = #bic_enum { elems=Elems },
     S2 = store_enumerators(Elems, S1),  %% install enumerators
     if Name =:= undefined ->
 	    {CEnum, S2};
@@ -378,15 +294,15 @@ enum(X=#bic_enum{line=Ln},S0) ->
     end.
 
 store_enumerators([{ID,Ln,Value}|Elems], S0) ->
-    CType = #ctype { type = int, const = true },
+    CType = #bic_type { type = int, const = true },
     case find_decl(ID, S0) of
 	error ->
-	    S1 = store_decl(ID, #cdecl { line=Ln,name=ID,
-					 type=CType,value=Value },S0),
+	    S1 = store_decl(ID, #bic_decl { line=Ln,name=ID,
+					    type=CType,value=Value },S0),
 	    store_enumerators(Elems, S1);
 	{ok,_} ->
-	    S1 = store_decl(ID, #cdecl { line=Ln,name=ID,
-					 type=CType,value=Value },S0),
+	    S1 = store_decl(ID, #bic_decl { line=Ln,name=ID,
+					    type=CType,value=Value },S0),
 	    S2 = add_error(S1,Ln,"~s already declared",[ID]),
 	    store_enumerators(Elems, S2)
     end;
@@ -414,7 +330,7 @@ enumerate([{ID,Ln,undefined}|Enums], Acc, I) ->
     enumerate(Enums, [{ID,Ln,I}|Acc], I+1);
 enumerate([E={ID,Ln,Value}|Enums], Acc, I) ->
     case Value of
-	#cconst { value = Value1 } when is_integer(Value1) ->
+	#bic_constant { value = Value1 } when is_integer(Value1) ->
 	    enumerate(Enums, [{ID,Ln,Value1}|Acc], I);
 	_ -> %% fixme eval
 	    enumerate(Enums, [E|Acc], I)
@@ -423,7 +339,7 @@ enumerate([], Acc, _I) ->
     lists:reverse(Acc).
 
 type(undefined,Ln,S) ->
-    {#ctype{line=Ln}, S};
+    {#bic_type{line=Ln}, S};
 type(T,Ln,S) ->
     type_(T,Ln,S).
 
@@ -446,10 +362,10 @@ type_(#bic_typeid { line=Ln,name=Name},_Ln,S) ->
     case find_type(Name, S) of
 	error ->
 	    S1 = add_error(S,Ln,"type '~s' not found", [Name]),
-	    {#ctype { type=int }, S1};
+	    {#bic_type { type=int }, S1};
 	{ok,Typedef} ->
 	    %% fixme: check interaction between T and T1
-	    {Typedef#ctypedef.type,S}
+	    {Typedef#bic_typedef.type,S}
     end;
 type_(X=#bic_enum{},_Ln,S)  ->
     enum(X, S);
@@ -459,73 +375,86 @@ type_(X=#bic_union{},_Ln,S) ->
     union(X, S);
 type_(X=#bic_type{},Ln,S) ->
     %% FIXME: check combinations!
-    {#ctype{line=Ln,
-	    sign=X#bic_type.sign,
-	    const=X#bic_type.const,
-	    volatile=X#bic_type.volatile,
-	    size=X#bic_type.size,
-	    type=X#bic_type.type}, S}.
+    {#bic_type{line=Ln,
+	       sign=X#bic_type.sign,
+	       const=X#bic_type.const,
+	       volatile=X#bic_type.volatile,
+	       inline=X#bic_type.inline,
+	       size=X#bic_type.size,
+	       type=X#bic_type.type}, S}.
 
 expr(undefined, S0) ->
     {undefined, S0};
 expr(C=#bic_constant { }, S0) ->
     constant(C,S0);
-expr(#bic_id { line=Ln, name=Name }, S0) ->
+expr(X=#bic_id { line=Ln, name=Name }, S0) ->
     case find_decl(Name, S0) of
 	error ->
 	    S1 = add_error(S0,Ln,"identifier '~s' not declared", [Name]),
-	    { #cvar { line=Ln, id=Name, type=#ctype { type=int } }, S1 };
+	    { X#bic_id { type=#bic_type { type=int } }, S1 };
 	{ok,CDecl} ->
 	    %% io:format("decl of ~s = ~p\n", [Name, CDecl]),
-	    CVar = #cvar { line=Ln, id=Name, type=CDecl#cdecl.type },
-	    {CVar, S0}
+	    { X#bic_id { type=CDecl#bic_decl.type }, S0}
     end;
-expr(#bic_unary { line=Ln, op=sizeof, arg=Type }, S0) ->
-    {CArg,S1} = try expr(Type, S0) of
-		    ExprR -> ExprR
-		catch
-		    error:_ ->
-			type(Type,Ln,S0)
-		end,
-    {#cunary{line=Ln, op=sizeof, arg=CArg }, S1};
-expr(#bic_unary { line=Ln, op=Op, arg=Arg}, S0) ->
+expr(X=#bic_unary { line=Ln, op=sizeof, arg=Type }, S0) ->
+    {SzArg,S2} = try expr(Type, S0) of
+		     {X1,S1} -> {typeof(X1), S1}
+		 catch
+		     error:_ ->
+			 type(Type,Ln,S0)
+		 end,
+    %% FIXME: when to calculate SzArg?
+    {X#bic_unary{ type=sizeof_type(Ln), arg=SzArg }, S2};
+expr(X=#bic_unary { line=Ln, op=typeof, arg=Type }, S0) ->
+    %% typeof(expr | type)
+    {Type1,S2} = try expr(Type, S0) of
+		     {X1,S1} -> {typeof(X1),S1}
+		 catch
+		     error:_ ->
+			 type(Type,Ln,S0)
+		 end,
+    {X#bic_unary{ arg=Type1 }, S2};
+expr(X=#bic_unary { line=Ln, op=Op, arg=Arg}, S0) ->
     {CArg,S1} = expr(Arg,S0),
     {CType,S2} = check_type(Ln,Op,typeof(CArg),S1),
-    {#cunary { line=Ln, op=Op, type=CType, arg=CArg }, S2};
-expr(#bic_binary { line=Ln, op=cast, arg1=Type, arg2=Arg2}, S0) ->
+    {X#bic_unary { type=CType, arg=CArg }, S2};
+expr(X=#bic_binary { line=Ln, op=cast, arg1=Type, arg2=Arg2}, S0) ->
     {CArg2,S1} = expr(Arg2,S0),
     {CType,S2} = type(Type,Ln,S1),
-    {#cbinary { line=Ln, op=cast,type=CType,arg1=CType,arg2=CArg2}, S2};
-expr(#bic_binary { line=Ln, op=Op, arg1=Arg1, arg2=Arg2}, S0) ->
+    {X#bic_binary { type=CType,arg1=CType,arg2=CArg2}, S2};
+expr(X=#bic_binary { line=Ln, op=Op, arg1=Arg1, arg2=Arg2}, S0) ->
     {CArg1,S1} = expr(Arg1,S0),
     {CArg2,S2} = expr(Arg2,S1),
     {CType,S3} = check_type(Ln,Op,typeof(CArg1),typeof(CArg2),S2),
-    {#cbinary { line=Ln, op=Op,type=CType,arg1=CArg1,arg2=CArg2}, S3};
-expr(#bic_call { line=Ln, func=Func, args=Args }, S0) ->
+    {X#bic_binary { type=CType,arg1=CArg1,arg2=CArg2}, S3};
+expr(X=#bic_call { line=Ln, func=Func, args=Args }, S0) ->
     {CFunc, S1} = expr(Func, S0),
-    {CArgs, S2} = expr(Args, S1),
-    %% check actal args with formal arguments
+    {CArgs, S2} = expr_list(Args, S1),
+    %% check actal args with formal arguments 
     {CType,S3} = check_type(Ln, call, typeof(CFunc), typeof(CArgs), S2),
-    {#ccall { line=Ln, func = CFunc, type=CType, args = CArgs }, S3};
-expr(#bic_assign { line=Ln, op=Op, lhs=Lhs, rhs=Rhs}, S0) ->
-    {CLhs,S1} = expr(Lhs,S0), %% lhs!!
-    {CRhs,S2} = expr(Rhs,S1),
+    {X#bic_call { func = CFunc, type=CType, args = CArgs }, S3};
+expr(X=#bic_assign { line=Ln, op=Op, lhs=Lhs, rhs=Rhs}, S0) ->
+    {CLhs,S1} = expr(Lhs,S0), %% fixme check valid lhs!!
+    {CRhs,S2} = expr(Rhs,S1), %% fixme check valid rhs (and undefined)
     {CType,S3} = check_assign(Ln, Op, typeof(CLhs), typeof(CRhs), S2),
-    {#cassign { line=Ln, op=Op, type=CType, lhs=CLhs, rhs=CRhs}, S3};
-expr(#bic_ifexpr { line=Ln, test=Test, then=Then, else=Else}, S0) ->
+    {X#bic_assign { type=CType, lhs=CLhs, rhs=CRhs}, S3};
+expr(X=#bic_ifexpr { line=Ln, test=Test, then=Then, else=Else}, S0) ->
     {CTest,S1} = expr(Test,S0),
     {CThen,S2} = expr(Then,S1),
     {CElse,S3} = expr(Else,S2),
     %% CThen and CElse must be compatible
     %% {CType,S3} = check_type(Op,CTest,CElse,S3),
     {CType,S4} = check_type(Ln,'==',CThen,CElse,S3),
-    {#cifexpr { line=Ln, test=CTest, type=CType, then=CThen, else=CElse}, S4};
-expr([X | Xs], S0) ->
+    {X#bic_ifexpr { type=CType, test=CTest, then=CThen, else=CElse}, S4}.
+
+expr_list(Xs,S0) ->
+    expr_list_(Xs,S0,[]).
+
+expr_list_([X|Xs],S0,Acc) ->
     {CX,S1}  = expr(X,S0),
-    {CXs,S2} = expr(Xs,S1),
-    {[CX|CXs], S2};
-expr([], S0) ->
-    {[], S0}.
+    expr_list_(Xs,S1,[CX|Acc]);
+expr_list_([],Si,Acc) ->
+    {lists:reverse(Acc),Si}.
 
 is_compare_op('<') -> true;
 is_compare_op('<=') -> true;
@@ -576,15 +505,15 @@ is_pointer_op(Op) -> is_compare_op(Op).
 check_type(Ln, Op, T, S) ->
     if Op =:= '~'; Op =:= '!' ->
 	    case is_int_type(T) of
-		true -> {T#ctype{line=Ln}, S};
+		true -> {T#bic_type{line=Ln}, S};
 		false ->
 		    %% coerce pointer to integer
 		    S1 = add_error(S,Ln,"operator ~s expect integer arguments",
 				   [Op]),
-		    {#ctype{line=Ln,type=int}, S1}
+		    {#bic_type{line=Ln,type=int}, S1}
 	    end;
        Op =:= '&' ->
-	    {{pointer,T#ctype{line=Ln}}, S};
+	    {{pointer,T#bic_type{line=Ln}}, S};
        Op =:= '*' ->
 	    case T of
 		{pointer,Type} ->
@@ -592,16 +521,16 @@ check_type(Ln, Op, T, S) ->
 		_ ->
 		    S1 = add_error(S,Ln,"argument is not a pointer type",
 				   []),
-		    {#ctype{line=Ln,type=int}, S1}
+		    {#bic_type{line=Ln,type=int}, S1}
 	    end;
        Op =:= '-'; Op =:= '+' ->
 	    case is_number_type(T) of
 		true ->
-		    {T#ctype{line=Ln},S};
+		    {T#bic_type{line=Ln},S};
 		_ ->
 		    S1 = add_error(S,Ln,"operator ~s expect scalar arguments",
 				   [Op]),
-		    {T#ctype{line=Ln}, S1}
+		    {T#bic_type{line=Ln}, S1}
 	    end;
        Op =:= '++'; Op =:= '--'; Op =:= '+++'; Op =:= '---' ->
 	    case is_pointer_type(T) of
@@ -610,17 +539,17 @@ check_type(Ln, Op, T, S) ->
 		false ->
 		    case is_int_type(T) of
 			true ->
-			    {T#ctype{line=Ln},S};
+			    {T#bic_type{line=Ln},S};
 			false ->
 			    S1 = add_error(S,Ln,"operator ~s expect scalar arguments",
 					   [Op]),
-			    {T#ctype{line=Ln}, S1}
+			    {T#bic_type{line=Ln}, S1}
 		    end
 	    end;
        true ->
 	    S1 = add_error(S,Ln,"operator ~s not expected",[Op]),
 	    io:format("T = ~w, S1 = ~w\n", [T, S1]),
-	    {T#ctype{line=Ln}, S1}
+	    {T#bic_type{line=Ln}, S1}
     end.
 
 check_type(Ln, '[]', T1, T2, S) ->
@@ -635,7 +564,7 @@ check_type(Ln, '[]', T1, T2, S) ->
 		    {base_type(T1), S};
 		false ->
 		    S1 = add_error(S,Ln,"subscript is not an array",[]),
-		    {#ctype{line=Ln,type=int}, S1}
+		    {#bic_type{line=Ln,type=int}, S1}
 	    end
     end;
 check_type(Ln, '+', T1, T2, S) ->
@@ -665,17 +594,17 @@ coerce(T1,_T2) ->
 check_assign(_Ln, _Op, Lhs, _Rhs, S0) ->
     {Lhs, S0}.
 
-is_int_type(Ct=#ctype{}) ->
-    case Ct#ctype.type of
+is_int_type(Ct=#bic_type{}) ->
+    case Ct#bic_type.type of
 	char -> true;
 	int -> true;
 	_ -> false
     end;
-is_int_type(#cenum{}) -> true;
+is_int_type(#bic_enum{}) -> true;
 is_int_type(_) -> false.
 
-is_number_type(#ctype{}) -> true;
-is_number_type(#cenum{}) -> true;
+is_number_type(#bic_type{}) -> true;
+is_number_type(#bic_enum{}) -> true;
 is_number_type(_) -> false.
 
 base_type({pointer,Type}) -> Type;
@@ -690,46 +619,49 @@ is_array_type(_) -> false.
 is_pointer_type({pointer,_}) -> true;
 is_pointer_type(_) -> false.
 
-typeof(#cconst  {type=Type}) -> Type;
-typeof(#cvar    {type=Type}) -> Type;
-typeof(#cunary  {type=Type}) -> Type;
-typeof(#cbinary {type=Type}) -> Type;
-typeof(#ccall   {type=Type}) -> Type;
-typeof(#cassign {type=Type}) -> Type;
-typeof(#cifexpr {type=Type}) -> Type;
-typeof([X|Xs]) -> [typeof(X) | typeof(Xs)];
-typeof([]) -> [].
+%% fixme:
+sizeof_type(Ln) ->
+    #bic_type{ line=Ln, sign=unsigned, const=true, size=long, type=int}.
 
 
-lineof(#cconst {line=Line}) -> Line;
-lineof(#cvar {line=Line}) -> Line;
-lineof(#cunary {line=Line}) -> Line;
-lineof(#cbinary {line=Line}) -> Line;
-lineof(#ccall {line=Line}) -> Line;
-lineof(#cassign {line=Line}) -> Line;
-lineof(#cifexpr {line=Line}) -> Line.
+typeof(#bic_constant{type=Type}) -> Type;
+typeof(#bic_id     {type=Type}) -> Type;
+typeof(#bic_unary  {type=Type}) -> Type;
+typeof(#bic_binary {type=Type}) -> Type;
+typeof(#bic_call   {type=Type}) -> Type;
+typeof(#bic_assign {type=Type}) -> Type;
+typeof(#bic_ifexpr {type=Type}) -> Type.
 
+lineof(#bic_constant {line=Line}) -> Line;
+lineof(#bic_id {line=Line}) -> Line;
+lineof(#bic_unary {line=Line}) -> Line;
+lineof(#bic_binary {line=Line}) -> Line;
+lineof(#bic_call {line=Line}) -> Line;
+lineof(#bic_assign {line=Line}) -> Line;
+lineof(#bic_ifexpr {line=Line}) -> Line.
 
-constant(#bic_constant { line=Ln, base=float, value=Val },S0) ->
-    Const = #cconst { line=Ln, value=bic:constant_to_float(Val),
-		      type=#ctype { const=true, type=double }},
+constant(C=#bic_constant { base=float, token=Val },S0) ->
+    {Value, Type} = bic:token_to_float(Val),
+    Const = C#bic_constant { value=Value,
+			     type=#bic_type { const=true, type=Type }},
     {Const, S0};
-constant(#bic_constant { line=Ln, base=char, value=[$',Val,$'] },S0) ->
-    Const = #cconst { line=Ln, value=Val,
-		      type=#ctype { const=true, type=char }},
+constant(C=#bic_constant { base=char, token=Token },S0) ->
+    {Value, Type} = bic:token_to_char(Token),
+    Const = C#bic_constant { value=Value, 
+			     type=#bic_type { const=true,type=Type }},
     {Const, S0};
-constant(#bic_constant { line=Ln, base=string, value=Val },S0) ->
-    Const = #cconst { line=Ln, value=Val,
-		      type={array,#ctype{const=true,type=char},[]} },
+constant(C=#bic_constant { base=string, token=Token },S0) ->
+    {Value, Type} = bic:token_to_string(Token),
+    Const = C#bic_constant { value=Value,
+			     type={array,#bic_type{const=true,type=Type},[]} },
     {Const, S0};
-constant(#bic_constant { line=Ln, base=16, value=[$0,$x|Val] }, S0) ->
-    Const = #cconst { line=Ln, value=bic:constant_to_integer(Val, 16),
-		      type=#ctype { const=true, type=int }},
-    {Const, S0};
-constant(#bic_constant { line=Ln, base=B, value=Val },S0) when is_integer(B) ->
-    Const = #cconst { line=Ln, value=bic:constant_to_integer(Val, B),
-		      type=#ctype { const=true, type=int }},
+constant(C=#bic_constant { base=Base, token=Token }, S0) when 
+      Base =:= 2; Base =:= 8; Base =:= 10; Base =:= 16 ->
+    {Value,Type} = bic:token_to_integer(Token, Base),
+    Const = C#bic_constant { value=Value,
+			     type=#bic_type { const=true, type=Type }},
     {Const, S0}.
+
 
 add_warning(S, Ln, Fmt, Args) ->
     S#scope { warnings = [{Ln,Fmt,Args} | S#scope.warnings] }.

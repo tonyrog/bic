@@ -1,6 +1,8 @@
+%% -*- erlang -*-
 {application, bic,
- [{description, "Beam interpreted C"},
-  {vsn, "1.0"},
+ [{description, "C parser"},
+  {vsn, git},
+  {modules, ["@@MODULES@@"]},
   {env, []},
   {applications,[kernel,stdlib]}
   ]}.

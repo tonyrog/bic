@@ -9,7 +9,7 @@
 
 -behaviour(gen_server).
 
--include("bic.hrl").
+-include("../include/bic.hrl").
 
 %% -define(debug, true).
 
