@@ -361,8 +361,7 @@
 	 code :: [bic_statement()]
 	}).
 
--type bic_compound() ::
-	#bic_compound {} | [ bic_statement() ].
+-type bic_compound() :: #bic_compound {} | [ bic_statement() ].
 
 %% begin/end mark compond ( { }  ) start and stop pairs in bic_transform
 

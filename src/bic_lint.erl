@@ -165,18 +165,18 @@ statement(Y=#bic_default {line=Ln}, S0) ->
 statement(Y=#bic_return { line=Ln,expr=Expr}, S0) ->
     {CExpr,S1} = expr(Expr,S0),
     F = S0#scope.func,
-    S1 = 
+    S3 = 
 	if F =:= undefined ->
-		add_error(S0, Ln,
+		add_error(S1, Ln,
 			  "return statement not in a function",
 			  []); 
 	   true ->
 		{_CType,S2}=check_type(Ln,'==',typeof(CExpr),
-				       F#bic_function.type,S0),
+				       F#bic_function.type,S1),
 		S2
 	end,
     CReturn = Y#bic_return { expr = CExpr },
-    {CReturn, S1};
+    {CReturn, S3};
 statement(Y=#bic_compound{code=Stmts}, S0) ->
     {Stmts1,S1} = compound(Stmts, [], S0),
     {Y#bic_compound{code=Stmts1}, S1};
@@ -343,45 +343,40 @@ type(undefined,Ln,S) ->
 type(T,Ln,S) ->
     type_(T,Ln,S).
 
-type_(#bic_pointer{type=T},Ln,S) -> 
+type_(Xt=#bic_pointer{type=T},Ln,S) -> 
     {T1,S1} = type_(T,Ln,S),
-    {{pointer,T1},S1};
-type_(#bic_array{type=T,dim=D},Ln,S) ->
+    {Xt#bic_pointer{type=T1},S1};
+type_(Xt=#bic_array{type=T,dim=D},Ln,S) ->
     {T1,S1} = type_(T,Ln,S),
-    {{array,T1,D},S1};
-type_(#bic_fn{type=T,params=Ps},Ln,S) -> 
+    {D1,S2} = if D =:= [] -> {[],S1};
+		 true -> expr(D, S1)
+	      end,
+    {Xt#bic_array{type=T1,dim=D1},S2};
+type_(Xt=#bic_fn{type=T,params=Ps},Ln,S) -> 
     {T1,S1} = type_(T,Ln,S),
     S2 = push_scope(S1),
     {Ps1,S3} = decls(Ps,S2),
     S4 = pop_scope(S3),
-    {{fn,T1,Ps1},S4};
-
-type_(T=#bic_typeid {name="..."},_Ln,S) ->
-    {T,S};
+    {Xt#bic_fn{type=T1,params=Ps1},S4};
+type_(Xt=#bic_typeid {name="..."},_Ln,S) ->
+    {Xt,S};
 type_(#bic_typeid { line=Ln,name=Name},_Ln,S) ->
     case find_type(Name, S) of
 	error ->
 	    S1 = add_error(S,Ln,"type '~s' not found", [Name]),
 	    {#bic_type { type=int }, S1};
-	{ok,Typedef} ->
+	{ok,Yt} ->
 	    %% fixme: check interaction between T and T1
-	    {Typedef#bic_typedef.type,S}
+	    {Yt#bic_typedef.type,S}
     end;
-type_(X=#bic_enum{},_Ln,S)  ->
-    enum(X, S);
-type_(X=#bic_struct{},_Ln,S) -> 
-    struct(X, S);
-type_(X=#bic_union{},_Ln,S) ->
-    union(X, S);
-type_(X=#bic_type{},Ln,S) ->
-    %% FIXME: check combinations!
-    {#bic_type{line=Ln,
-	       sign=X#bic_type.sign,
-	       const=X#bic_type.const,
-	       volatile=X#bic_type.volatile,
-	       inline=X#bic_type.inline,
-	       size=X#bic_type.size,
-	       type=X#bic_type.type}, S}.
+type_(Xt=#bic_enum{},_Ln,S)  ->
+    enum(Xt, S);
+type_(Xt=#bic_struct{},_Ln,S) -> 
+    struct(Xt, S);
+type_(Xt=#bic_union{},_Ln,S) ->
+    union(Xt, S);
+type_(Xt=#bic_type{},_Ln,S) ->
+    {Xt, S}.
 
 expr(undefined, S0) ->
     {undefined, S0};
@@ -403,7 +398,6 @@ expr(X=#bic_unary { line=Ln, op=sizeof, arg=Type }, S0) ->
 		     error:_ ->
 			 type(Type,Ln,S0)
 		 end,
-    %% FIXME: when to calculate SzArg?
     {X#bic_unary{ type=sizeof_type(Ln), arg=SzArg }, S2};
 expr(X=#bic_unary { line=Ln, op=typeof, arg=Type }, S0) ->
     %% typeof(expr | type)
@@ -431,7 +425,7 @@ expr(X=#bic_call { line=Ln, func=Func, args=Args }, S0) ->
     {CFunc, S1} = expr(Func, S0),
     {CArgs, S2} = expr_list(Args, S1),
     %% check actal args with formal arguments 
-    {CType,S3} = check_type(Ln, call, typeof(CFunc), typeof(CArgs), S2),
+    {CType,S3} = check_type(Ln, call, typeof(CFunc), typeof_list(CArgs), S2),
     {X#bic_call { func = CFunc, type=CType, args = CArgs }, S3};
 expr(X=#bic_assign { line=Ln, op=Op, lhs=Lhs, rhs=Rhs}, S0) ->
     {CLhs,S1} = expr(Lhs,S0), %% fixme check valid lhs!!
@@ -513,10 +507,10 @@ check_type(Ln, Op, T, S) ->
 		    {#bic_type{line=Ln,type=int}, S1}
 	    end;
        Op =:= '&' ->
-	    {{pointer,T#bic_type{line=Ln}}, S};
+	    {#bic_pointer{line=Ln,type=T}, S};
        Op =:= '*' ->
 	    case T of
-		{pointer,Type} ->
+		#bic_pointer{type=Type} ->
 		    {Type, S};  %% fixme set line number of Type
 		_ ->
 		    S1 = add_error(S,Ln,"argument is not a pointer type",
@@ -607,22 +601,24 @@ is_number_type(#bic_type{}) -> true;
 is_number_type(#bic_enum{}) -> true;
 is_number_type(_) -> false.
 
-base_type({pointer,Type}) -> Type;
-base_type({array,Type,_Dim}) -> Type.
+base_type(#bic_pointer{type=Type}) -> Type;
+base_type(#bic_array{type=Type}) -> Type.
 
 is_address_type(Type) ->
     is_array_type(Type) orelse is_pointer_type(Type).
 
-is_array_type({array,_,_}) -> true;
+is_array_type(#bic_array{}) -> true;
 is_array_type(_) -> false.
 
-is_pointer_type({pointer,_}) -> true;
+is_pointer_type(#bic_pointer{}) -> true;
 is_pointer_type(_) -> false.
 
 %% fixme:
 sizeof_type(Ln) ->
     #bic_type{ line=Ln, sign=unsigned, const=true, size=long, type=int}.
 
+typeof_list(Ts) ->
+    [typeof(T) || T <- Ts].
 
 typeof(#bic_constant{type=Type}) -> Type;
 typeof(#bic_id     {type=Type}) -> Type;
@@ -641,25 +637,22 @@ lineof(#bic_assign {line=Line}) -> Line;
 lineof(#bic_ifexpr {line=Line}) -> Line.
 
 constant(C=#bic_constant { base=float, token=Val },S0) ->
-    {Value, Type} = bic:token_to_float(Val),
-    Const = C#bic_constant { value=Value,
-			     type=#bic_type { const=true, type=Type }},
+    {Value, FloatType} = bic:token_to_float(Val),
+    Const = C#bic_constant { value=Value, type=FloatType },
     {Const, S0};
 constant(C=#bic_constant { base=char, token=Token },S0) ->
-    {Value, Type} = bic:token_to_char(Token),
-    Const = C#bic_constant { value=Value, 
-			     type=#bic_type { const=true,type=Type }},
+    {Value, CharType} = bic:token_to_char(Token),
+    Const = C#bic_constant { value=Value, type=CharType},
     {Const, S0};
 constant(C=#bic_constant { base=string, token=Token },S0) ->
-    {Value, Type} = bic:token_to_string(Token),
-    Const = C#bic_constant { value=Value,
-			     type={array,#bic_type{const=true,type=Type},[]} },
+    {Value, CharType} = bic:token_to_string(Token),
+    Const = C#bic_constant { value=Value, 
+			     type=#bic_array{type=CharType,dim=[]} },
     {Const, S0};
 constant(C=#bic_constant { base=Base, token=Token }, S0) when 
       Base =:= 2; Base =:= 8; Base =:= 10; Base =:= 16 ->
     {Value,Type} = bic:token_to_integer(Token, Base),
-    Const = C#bic_constant { value=Value,
-			     type=#bic_type { const=true, type=Type }},
+    Const = C#bic_constant { value=Value, type=Type },
     {Const, S0}.
 
 

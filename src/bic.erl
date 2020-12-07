@@ -5,6 +5,7 @@
 
 -module(bic).
 
+-export([main/1]).
 -export([file/1, file/2]).
 -export([string/1, string/2]).
 -export([parse/1, parse/2]).
@@ -21,7 +22,7 @@
 -export([format_definitions/1]).
 -export([combine_types/2]).
 -export([complete_type/1]).
--export([token_to_integer/2]).
+-export([token_to_integer/1, token_to_integer/2]).
 -export([token_to_float/1]).
 -export([token_to_string/1]).
 -export([token_to_char/1]).
@@ -38,42 +39,118 @@
 -type cpp_option() :: {define,Name::string(),Value::term()} |
 		      {include, Path::string()} |
 		      {qinclude, Path::string()}.
-
 -type cpp_options() :: [cpp_option()].
+
+-type bic_options() :: 
+	#{ model => undefined | 32 | 64,
+	   cpp_only => boolean(),
+	   cpp_dump => boolean(),
+	   lint => boolean(),
+	   unique => boolean(),
+	   unroll => boolean(),
+	   cpp => cpp_options()
+	 }.
 
 -type bic() :: [#bic_function{} | #bic_decl{}].
 
-command() ->
-    io:format("bic: no input files\n"),
-    halt(1).
+main(Args) ->
+    main(Args, #{ defines => [] }).
 
-command([]) ->
+main(["-m32" | Args], Opts) ->
+    main(Args, Opts#{ model => 32 });
+main(["-m64" | Args], Opts) ->
+    main(Args, Opts#{ model => 64 });
+main(["-cpp" | Args], Opts) ->
+    main(Args, Opts#{ cpp_only => true });
+main(["-cdd" | Args], Opts) ->
+    main(Args, Opts#{ cpp_dump => true });
+main(["-nolint" | Args], Opts) ->
+    main(Args, Opts#{ lint => false });
+main(["-unique" | Args], Opts) ->
+    main(Args, Opts#{ unique => true });
+main(["-unroll" | Args], Opts) ->
+    main(Args, Opts#{ unroll => true });
+main(["-D",MacroValue|Args], Opts) ->
+    case string:split(MacroValue,"=") of
+	[Macro,Value] ->
+	    Defs = maps:get(cpp, Opts, []),
+	    Defs1 = [{defined,Macro,Value}|Defs],
+	    main(Args, Opts#{ cpp => Defs1 });
+	[Macro] ->
+	    Defs = maps:get(cpp, Opts, []),
+	    Defs1 = [{defined,Macro,1}|Defs],
+	    main(Args, Opts#{ cpp => Defs1 })
+    end;
+main(["-D"++MacroValue|Args], Opts) ->
+    case string:split(MacroValue,"=") of
+	[Macro,Value] ->
+	    Defs = maps:get(cp, Opts, []),
+	    Defs1 = [{defined,Macro,Value}|Defs],
+	    main(Args, Opts#{ cpp => Defs1 });
+	[Macro] ->
+	    Defs = maps:get(cpp, Opts, []),
+	    Defs1 = [{defined,Macro,1}|Defs],
+	    main(Args, Opts#{ cpp => Defs1 })
+    end;
+main(["-h"|_Args], _Opts) -> usage();
+main(["-help"|_Args], _Opts) -> usage();
+main([],_) ->
     io:format("bic: no input files\n"),
     halt(1);
-command([Filename]) when is_atom(Filename) ->
-    case file(atom_to_list(Filename)) of
-	{ok,List} ->
-	    io:format("~p\n", [List]),
-	    halt(0);
-	_Err ->
-	    halt(1)
+main(Files, Opts) ->
+    case run(Files, Opts) of
+	ok -> halt(0);
+	{error,_} -> halt(1)
     end.
 
+usage() ->
+    io:format("usage: bic [-m32|-m64] options -Dmacro=value files\n"),
+    io:format("OPTIONS\n"),
+    io:format("  -cpp      cpp only\n"),
+    io:format("  -nolint   skip lint\n"),
+    io:format("  -unique   make variables unique\n"),
+    io:format("  -unroll   unroll functions\n"),
+    halt(0).
+
+run([Filename|Files], Opts) ->
+    case file(Filename, Opts) of
+	{ok,Forms} ->
+	    Forms1 =
+		case maps:get(unique, Opts, false) of
+		    true ->
+			bic_transform:unique(Forms);
+		    false ->
+			Forms
+		end,
+	    io:put_chars(format_definitions(Forms1)),
+	    run(Files, Opts);
+	_Err ->
+	    halt(1)
+    end;
+run([], _Opts) ->
+    halt(0).
+
 string(String) ->
-    string(String, []).
+    string(String, #{}).
 
 -spec string(String::string(), Env::cpp_options()) ->
 		    {ok, bic()} | {error, Reason::term()}.
 
-string(String, Env) ->
-    Env1 = [{define,"__bic__", 1},
-	    {define,"__bic_extension_bitfield__", 1} | Env],
-    case bic_cpp:string(String, Env1) of
+string(String, Opts) ->
+    CppOpts = maps:get(cpp, Opts, []),
+    CppOpts1 = [{define,"__bic__", 1},
+	     {define,"__bic_extension_bitfield__", 1} | CppOpts],
+    case bic_cpp:string(String, CppOpts1) of
 	{ok,Fd} ->
 	    bic_scan:init(),  %% setup some dictionay stuff
 	    bic_parse:init(), %% setup some dictionay stuff
 	    Res = (catch bic_parse:parse_and_scan({bic, scan, [Fd]})),
-	    %% maybe_dump_cpp_variables(Fd),
+	    case maps:get(cpp_dump, Opts, false) of
+		true ->
+		    dump_cpp_variables(Fd);
+		false ->
+		    ok
+	    end,
 	    bic_cpp:close(Fd),
 	    case Res of 
 		{error,{{Fn,Ln},Mod,Message}} when is_integer(Ln) ->
@@ -95,29 +172,39 @@ string(String, Env) ->
 
 %% parse and lint file
 file(File) ->
-    file(File,[]).
+    file(File,#{}).
 
--spec file(Filename::string(), Env::cpp_options()) ->
+-spec file(Filename::string(), Opts::bic_options()) ->
 		  {ok, bic()} | {error, Reason::term()}.
 
-file(Filename,CppEnv) ->
-    case parse(Filename, CppEnv) of
+file(Filename,Opts) ->
+    case parse(Filename, Opts) of
 	{ok,Forms} ->
-	    case bic_lint:forms(Filename,Forms) of
-		{ok,LintForms} ->
-		    {ok,LintForms};
-		Err={error,_} ->
-		    Err
+	    case maps:get(cpp_only, Opts, false) of
+		true ->
+		    {ok,Forms};
+		false ->
+		    case maps:get(lint, Opts, true) of
+			true ->
+			    case bic_lint:forms(Filename,Forms) of
+				{ok,LintForms} ->
+				    {ok,LintForms};
+				Err={error,_} ->
+				    Err
+			    end;
+			false ->
+			    {ok,Forms}
+		    end
 	    end;
 	Error ->
 	    Error
     end.
 
 print(Filename) ->
-    print(Filename,[]).
+    print(Filename,#{}).
 
-print(Filename, CppEnv) ->
-    case file(Filename, CppEnv) of
+print(Filename, Opts) ->
+    case file(Filename, Opts) of
 	{ok,Forms} ->
 	    io:put_chars(format_definitions(Forms));
 	Error ->
@@ -125,10 +212,10 @@ print(Filename, CppEnv) ->
     end.
 
 unique(Filename) ->
-    unique(Filename,[]).
+    unique(Filename,#{}).
 
-unique(Filename, CppEnv) ->
-    case file(Filename, CppEnv) of
+unique(Filename, Opts) ->
+    case file(Filename, Opts) of
 	{ok,Forms} ->
 	    Forms1 = bic_transform:unique(Forms),
 	    io:put_chars(format_definitions(Forms1));
@@ -136,21 +223,27 @@ unique(Filename, CppEnv) ->
 	    Error
     end.
 
--spec parse(Filename::string(), Env::cpp_options()) ->
+-spec parse(Filename::string(), Env::bic_options()) ->
 		   {ok, bic()} | {error, Reason::term()}.
 %% parse file, not lint
 parse(File) ->
-    parse(File, []).
+    parse(File, #{}).
 
-parse(Filename, Env) ->
-    Env1 = [{define,"__bic__", 1},
-	    {define,"__bic_extension_bitfield__", 1} | Env],
-    case bic_cpp:open(Filename, Env1) of
+parse(Filename, Opts) ->
+    CppOpts = maps:get(cpp, Opts, []),
+    CppOpts1 = [{define,"__bic__", 1},
+		{define,"__bic_extension_bitfield__", 1} | CppOpts],
+    case bic_cpp:open(Filename, CppOpts1) of
 	{ok,Fd} ->
 	    bic_scan:init(),  %% setup some dictionay stuff
 	    bic_parse:init(), %% setup some dictionay stuff
 	    Res = (catch bic_parse:parse_and_scan({bic, scan, [Fd]})),
-	    %% maybe_dump_cpp_variables(Fd),
+	    case maps:get(cpp_dump, Opts, false) of
+		true ->
+		    dump_cpp_variables(Fd);
+		false ->
+		    ok
+	    end,
 	    bic_cpp:close(Fd),
 	    case Res of 
 		{error,{{Fn,Ln},Mod,Message}} when is_integer(Ln) ->
@@ -167,17 +260,15 @@ parse(Filename, Env) ->
 		    {ok,Forms}
 	    end
     end.
-    
 
-maybe_dump_cpp_variables(Fd) ->
-    io:format("Variable dump:\n"),
+dump_cpp_variables(Fd) ->
     lists:foreach(
       fun({Name,[{string,_,Value}]}) ->
 	      io:format("~s: \"~s\"\n", [Name,Value]);
 	 ({Name, Value}) ->
 	      io:format("~s: ~p\n", [Name,Value])
       end, bic_cpp:values(Fd)).
-
+    
 %% Scanner wrapper (simplify debugging)
 scan(Fd) ->
     Res = bic_scan:scan(Fd),
@@ -455,7 +546,7 @@ prio(_) ->
 
 format_expr(X) when is_integer(X) -> integer_to_list(X);
 format_expr(#bic_id{name=Name}) -> Name;
-format_expr(#bic_constant{value=Value}) -> Value;
+format_expr(#bic_constant{token=Value}) -> Value;
 
 format_expr(#bic_unary{op='+++',arg=Arg}) -> 
     [format_expr(Arg),"++"];
@@ -610,27 +701,69 @@ format_statements([Stmt|Stmts], I) ->
      format_statements(Stmts, I)].
 
 %% convert constants
-token_to_integer([$0,$x|Value], 16) ->
-    {list_to_integer(string:trim(Value,trailing,"uUlL"), 16), int};
-token_to_integer([$0,$X|Value], 16) ->
-    {list_to_integer(string:trim(Value,trailing,"uUlL"), 16), int};
-token_to_integer([$0,$b|Value], 2) ->
-    {list_to_integer(string:trim(Value,trailing,"uUlL"), 2), int};
-token_to_integer([$0,$B|Value], 2) ->
-    {list_to_integer(string:trim(Value,trailing,"uUlL"), 2), int};
-token_to_integer([$0|Value], 8) ->
-    {list_to_integer(string:trim(Value,trailing,"uUlL"), 8), int};
-token_to_integer(Value, 10) ->
-    {list_to_integer(string:trim(Value,trailing,"uUlL"), 10), int}.
+token_to_integer([$0,$x|Value]) -> token_to_integer_(Value, 16);
+token_to_integer([$0,$X|Value]) -> token_to_integer_(Value, 16);
+token_to_integer([$0,$b|Value]) -> token_to_integer_(Value, 2);
+token_to_integer([$0,$B|Value]) -> token_to_integer_(Value, 2);
+token_to_integer([$0|Value]) -> token_to_integer_(Value, 8);
+token_to_integer(Value) -> token_to_integer_(Value, 10).
+
+token_to_integer([$0,$x|Value], 16) -> token_to_integer_(Value, 16);
+token_to_integer([$0,$X|Value], 16) -> token_to_integer_(Value, 16);
+token_to_integer([$0,$b|Value], 2) -> token_to_integer_(Value, 2);
+token_to_integer([$0,$B|Value], 2) -> token_to_integer_(Value, 2);
+token_to_integer([$0|Value], 8) -> token_to_integer_(Value, 8);
+token_to_integer(Value, 10) -> token_to_integer_(Value, 10).
+
+token_to_integer_(Ds, Base) ->
+    token_to_integer_(Ds, Base, 0).
+
+token_to_integer_([D|Ds], Base, Val) when 
+      Base =< 20, (D-$0) >= 0, (D-$0) < 10 ->
+    token_to_integer_(Ds, Base, Val*Base + (D-$0));
+token_to_integer_([D|Ds], Base, Val) when 
+      Base =<  20, (D-$A) >= 0, (D-$A) < (Base-10) ->
+    token_to_integer_(Ds, Base, Val*Base + (D-$A)+10);
+token_to_integer_([D|Ds], Base, Val) when 
+      Base =<  20, (D-$a) >= 0, (D-$a) < (Base-10) ->
+    token_to_integer_(Ds, Base, Val*Base + (D-$a)+10);
+token_to_integer_([], _Base, Val) -> 
+    {Val, #bic_type { const=true, type=int}};
+token_to_integer_(Suffix, _Base, Val) -> 
+    T =
+	case string:to_lower(Suffix) of
+	    "l" -> 
+		#bic_type { const=true,size=long,type=int};
+	    "ll" ->
+		#bic_type { const=true,size=long_long,type=int};
+	    "u" ->
+		#bic_type { const=true,sign=unsigned,type=int};
+	    "lu" -> 
+		#bic_type { const=true,sign=unsigned,size=long,type=int};
+	    "ul" ->
+		#bic_type { const=true,sign=unsigned,size=long,type=int};
+	    "llu" -> 
+		#bic_type { const=true,sign=unsigned,size=long_long,type=int};
+	    "ull" ->
+		#bic_type { const=true,sign=unsigned,size=long_long,type=int};
+	    "z" ->
+		#bic_typeid { name="ssize_t" };
+	    "uz" ->
+		#bic_typeid { name="size_t" };
+	    "zu" ->
+		#bic_typeid { name="size_t" }
+	end,
+    {Val, T}.
 
 %% fixme: handle suffix
 token_to_float(String) ->
-    {list_to_float(string:trim(String,trailing,"fFlL")), double}.
+    {list_to_float(string:trim(String,trailing,"fFlL")),
+     #bic_type { const=true, type=double }}.
 
 %% return char/wchar_t
 token_to_char([$',Val,$']) ->
-    {Val, char}.
+    {Val, #bic_type{ const=true, type=char} }.
 
 %% fixme: check for utf8 interpret escape seqeunces
 token_to_string(Token) ->
-    {Token, char}.
+    {Token, #bic_type{ const=true, type=char}}.

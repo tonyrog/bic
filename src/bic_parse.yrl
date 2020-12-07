@@ -414,10 +414,14 @@ labeled_statement -> 'case' constant_expr ':' statement :
 labeled_statement -> 'default' ':' statement : 
 			 #bic_default {line=line('$1'),code='$3'}.
 
-compound_statement -> '{' '}' : [].
-compound_statement -> '{' statement_list '}' : '$2'.
-compound_statement -> '{' declaration_list '}' : '$2'.
-compound_statement -> '{' declaration_list statement_list '}' : '$2'++'$3'.
+compound_statement -> '{' '}' :
+			  #bic_compound{line=line('$1'),code=[]}.
+compound_statement -> '{' statement_list '}' : 
+			  #bic_compound{line=line('$1'),code='$2'}.
+compound_statement -> '{' declaration_list '}' :
+			  #bic_compound{line=line('$1'),code='$2'}.
+compound_statement -> '{' declaration_list statement_list '}' :
+			  #bic_compound{line=line('$1'),code='$2'++'$3'}.
 
 declaration_list -> declaration : '$1'.
 declaration_list -> declaration_list declaration : '$1'++'$2'.
@@ -482,7 +486,7 @@ function_definition -> declarator function_body :
 				       type=#bic_type{line='$1'#bic_decl.line,
 						      type=int},
 				       params=OldDecl,
-				       body=Body }.
+				       body=Body#bic_compound.code }.
 function_definition -> declaration_specifiers declarator function_body :
 			   {OldDecl,Body} = '$3',
 		       {Storage,TypeSpec} = '$1',
@@ -499,7 +503,7 @@ function_definition -> declaration_specifiers declarator function_body :
 				       storage=Storage,
 				       type=ReturnType,
 				       params=FnParams,
-				       body=Body }.
+				       body=Body#bic_compound.code }.
 
 function_body -> compound_statement : {[],'$1'}.
 function_body -> declaration_list compound_statement : {'$1','$2'}.
