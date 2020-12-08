@@ -12,14 +12,17 @@
 -export([print/1, print/2]).
 -export([unique/1, unique/2]).
 
--export([format_type/1]).
--export([format_expr/1]).
--export([format_exprs/1]).
--export([format_decl/1]).
--export([format_statement/1, format_statement/2]).
--export([format_statements/2]).
--export([format_definition/1]).
--export([format_definitions/1]).
+-export([is_atomic/1, is_expr/1]).
+-export([is_typespec/1, is_type/1]).
+-export([is_statement/1]).
+-export([is_compare_op/1]).
+-export([is_logical_op/1]).
+-export([is_bitwise_op/1]).
+-export([is_shift_op/1]).
+-export([is_integer_op/1]).
+-export([is_float_op/1]).
+-export([is_pointer_op/1]).
+
 -export([combine_types/2]).
 -export([complete_type/1]).
 -export([token_to_integer/1, token_to_integer/2]).
@@ -122,7 +125,7 @@ run([Filename|Files], Opts) ->
 		    false ->
 			Forms
 		end,
-	    io:put_chars(format_definitions(Forms1)),
+	    io:put_chars(bic_format:definitions(Forms1)),
 	    run(Files, Opts);
 	_Err ->
 	    halt(1)
@@ -179,21 +182,21 @@ file(File) ->
 
 file(Filename,Opts) ->
     case parse(Filename, Opts) of
-	{ok,Forms} ->
+	{ok,Defs} ->
 	    case maps:get(cpp_only, Opts, false) of
 		true ->
-		    {ok,Forms};
+		    {ok,Defs};
 		false ->
 		    case maps:get(lint, Opts, true) of
 			true ->
-			    case bic_lint:forms(Filename,Forms) of
-				{ok,LintForms} ->
-				    {ok,LintForms};
+			    case bic_lint:definitions(Filename,Defs) of
+				{ok,LintDefs} ->
+				    {ok,LintDefs};
 				Err={error,_} ->
 				    Err
 			    end;
 			false ->
-			    {ok,Forms}
+			    {ok,Defs}
 		    end
 	    end;
 	Error ->
@@ -206,7 +209,7 @@ print(Filename) ->
 print(Filename, Opts) ->
     case file(Filename, Opts) of
 	{ok,Forms} ->
-	    io:put_chars(format_definitions(Forms));
+	    io:put_chars(bic_format:definitions(Forms));
 	Error ->
 	    Error
     end.
@@ -218,7 +221,7 @@ unique(Filename, Opts) ->
     case file(Filename, Opts) of
 	{ok,Forms} ->
 	    Forms1 = bic_transform:unique(Forms),
-	    io:put_chars(format_definitions(Forms1));
+	    io:put_chars(bic_format:definitions(Forms1));
 	Error ->
 	    Error
     end.
@@ -274,6 +277,95 @@ scan(Fd) ->
     Res = bic_scan:scan(Fd),
     %% io:format("Scan: ~p\n", [Res]),
     Res.
+
+
+is_atomic(Const) when is_number(Const) -> true; %% maybe remove
+is_atomic(#bic_id{}) -> true;
+is_atomic(#bic_constant{}) -> true;
+is_atomic(_) -> false.
+
+is_expr(#bic_unary{}) -> true;
+is_expr(#bic_binary{}) -> true;
+is_expr(#bic_call{}) -> true;
+is_expr(#bic_ifexpr{}) -> true;
+is_expr(#bic_assign{}) -> true;
+is_expr(X) -> is_atomic(X).
+
+is_typespec(#bic_type{}) -> true;
+is_typespec(#bic_struct{}) -> true;
+is_typespec(#bic_union{}) -> true;
+is_typespec(#bic_typeid{}) -> true;
+is_typespec(#bic_enum{}) -> true;
+is_typespec(_) -> false.
+
+is_type(#bic_pointer{}) -> true;
+is_type(#bic_array{}) -> true;
+is_type(#bic_fn{}) -> true;
+is_type(T) -> is_typespec(T).
+
+is_statement(#bic_decl{}) -> true;
+is_statement(#bic_for{}) -> true;
+is_statement(#bic_while{}) -> true;
+is_statement(#bic_do{}) -> true;
+is_statement(#bic_if{}) -> true;
+is_statement(#bic_switch{}) -> true;
+is_statement(#bic_case{}) -> true;
+is_statement(#bic_default{}) -> true;
+is_statement(#bic_label{}) -> true;
+is_statement(#bic_goto{}) -> true;
+is_statement(#bic_continue{}) -> true;
+is_statement(#bic_break{}) -> true;
+is_statement(#bic_return{}) -> true;
+is_statement(#bic_empty{}) -> true;
+is_statement(#bic_compound{}) -> true;
+is_statement(#bic_expr_stmt{}) -> true;
+is_statement(_) -> false.
+
+is_compare_op('<') -> true;
+is_compare_op('<=') -> true;
+is_compare_op('>') -> true;
+is_compare_op('>=') -> true;
+is_compare_op('==') -> true;
+is_compare_op('!=') -> true;
+is_compare_op(_) -> false.
+
+is_logical_op('&&') -> true;
+is_logical_op('||') -> true;
+is_logical_op('!') -> true;
+is_logical_op(_) -> false.
+
+is_bitwise_op('&') -> true;
+is_bitwise_op('|') -> true;
+is_bitwise_op('^') -> true;
+is_bitwise_op('~') -> true;
+is_bitwise_op(_) -> false.
+
+is_shift_op('>>') -> true;
+is_shift_op('<<') -> true;
+is_shift_op(_) -> false.
+    
+is_integer_op('+') -> true;
+is_integer_op('-') -> true;
+is_integer_op('*') -> true; 
+is_integer_op('/') -> true; 
+is_integer_op('%') -> true; 
+is_integer_op(Op) ->
+    is_bitwise_op(Op) orelse
+	is_shift_op(Op) orelse
+	is_logical_op(Op) orelse
+	is_compare_op(Op).
+
+is_float_op('+') -> true;
+is_float_op('-') -> true;
+is_float_op('*') -> true;
+is_float_op('/') -> true;
+is_float_op(_) -> false.
+    
+is_pointer_op('+') -> true;
+is_pointer_op('-') -> true;
+is_pointer_op('++') -> true;
+is_pointer_op('--') -> true;
+is_pointer_op(Op) -> is_compare_op(Op).
 
 %% fill in some blanks in types!
 %% long => long int
@@ -370,348 +462,6 @@ defined(V, _W) ->
     io:format("error: merge values ~p and ~p\n", [V, _W]),
     V.
 
-format_type(undefined) -> "N";
-format_type('_') -> "_";
-format_type(#bic_typeid{name=Name}) -> Name;
-format_type(#bic_type{sign=S,const=C,volatile=V,size=Z,type=T}) ->
-    lists_join_no_empty(
-      " ",
-      [if C -> "const"; true -> "" end,
-       if V -> "volatile"; true -> "" end,
-       case S of
-	   undefined -> "";
-	   signed -> "signed";
-	   unsigned -> "unsigned"
-       end,
-       case Z of
-	   undefined -> "";
-	   short-> "short";
-	   long -> "long";
-	   long_long -> "long long"
-       end,
-       case T of
-	   undefined when S =/= undefined; Z =/= undefined -> "";
-	   undefined -> "U";
-	   '_' -> "T";
-	   void -> "void";
-	   char -> "char";
-	   int -> "int";
-	   float -> "float";
-	   double -> "double";
-	   #bic_struct{} -> format_type(T);
-	   #bic_union{} -> format_type(T);
-	   #bic_typeid{name=Name} -> [Name];
-	   #bic_enum{} -> format_type(T);
-	   #bic_pointer{} -> ["(",format_type(T),")"]
-       end]);
-format_type(#bic_enum{name=Name,elems=Es}) ->
-    ["enum ",optional(Name)," {", format_enums(Es), "}"];
-
-%% fixme: pointer to function pointer?
-format_type(#bic_pointer{type=Type=#bic_fn{}}) -> 
-    ["(*)",format_type(Type)];
-
-format_type(#bic_pointer{type=Type}) ->
-    [format_type(Type),"*"];
-format_type(#bic_array{type=Type,dim=_D}) ->
-    [format_type(Type)];
-format_type(#bic_fn{type=Type,params=Ps}) ->
-    [format_type(Type),"(",format_params(Ps),")"];
-format_type(#bic_struct{name=Name,elems=undefined}) ->
-    ["struct ",optional(Name)];
-format_type(#bic_struct{name=Name,elems=Es}) ->
-    ["struct ",optional(Name),"{", format_decls(Es),"}"];
-format_type(#bic_union{name=Name,elems=undefined}) ->
-    ["union ",optional(Name)];
-format_type(#bic_union{name=Name,elems=Es}) ->
-    ["union ",optional(Name),"{", format_decls(Es),"}"].
-
-
-format_dim(#bic_type{type=T}) when not is_atom(T) ->
-    format_dim(T);
-format_dim(#bic_array{type=T,dim=[]}) ->
-    [format_dim(T), "[]"];
-format_dim(#bic_array{type=T,dim=D}) ->
-    [format_dim(T),["[",format_expr(D),"]"]];
-format_dim(_) ->
-    [].
-
-optional(undefined) -> "";
-optional(String) when is_list(String) -> String.
-
-%% join strings but remove empty elements first
-lists_join_no_empty(Sep,Es) ->
-    lists:join(Sep, [A || A <- Es, A =/= ""]).
-
--type enum() :: {Name::string(),Line::integer(),Value::bic_expr()}.
--spec format_enum(E::enum()) -> string().
-
-format_enum({Name,_Ln,Value}) ->
-    [Name,"=",format_expr(Value)].
-
--spec format_enums(Enums::[enum()]) -> string().
-
-format_enums([]) -> [];
-format_enums([X]) -> [format_enum(X)];
-format_enums([X|Xs]) -> [format_enum(X),",",format_enums(Xs)].
-
--spec format_decl(Decl::bic_decl()) -> string().
-
-format_decl(#bic_decl{name=undefined,storage=Storage,type=Type,size=Size,value=Init}) ->
-    [format_storage(Storage),format_type(Type),format_dim(Type),format_size(Size),format_init(Init)];
-format_decl(#bic_decl{name=Name,storage=Storage,type=Type,size=Size,value=Init}) ->
-    [format_storage(Storage),format_type(Type)," ",Name,format_dim(Type),format_size(Size),format_init(Init)].
-
-format_size(undefined) -> "";
-format_size(Size) -> [":",format_expr(Size)].
-
-format_init(undefined) -> "";
-format_init(Init) -> ["=",format_expr(Init)].
-    
-format_storage(undefined) -> "";
-format_storage(Storage) -> [atom_to_list(Storage)," "].
-
--spec format_decls(Decls::[bic_decl()]) -> string().
-
-format_decls([]) -> [];
-format_decls([X|Xs]) -> [format_decl(X),";",format_decls(Xs)].
-
--spec format_params(Decls::[bic_decl()]) -> string().
-
-format_params([]) -> [];
-format_params([X]) -> [format_decl(X)];
-format_params([X|Xs]) -> [format_decl(X),",",format_params(Xs)].
-
--spec prio(Decl::bic_decl()|number()) -> integer();
-	  (Other::term()) -> false.
-
-%% check if tuple is and expression 
-%% return priority on success and false on failure
-prio(Const) when is_number(Const) -> 0;
-prio(#bic_constant{}) -> 0;
-prio(#bic_id{}) -> 0;
-prio(#bic_unary{op=Op}) ->
-    case Op of
-	sizeof -> 0;
-	typeof -> 0;
-	cast -> 0;
-	'+++' -> 0;  %% postfix ++
-	'---' -> 0;  %% postfix --
-	'+' -> 5;
-	'-' -> 5;
-	'!' -> 5;
-	'~' -> 5;
-	'++' -> 6;   %% prefix
-	'--' -> 6;   %% prefix
-	'&' -> 7;
-	'*' -> 7
-    end;
-prio(#bic_binary{op=Op}) ->
-    case Op of
-	'[]' -> 0;
-	'*' -> 10;
-	'/' -> 10;
-	'%' -> 10;
-	'+' -> 20;
-	'-' -> 20;
-	'<<' -> 30;
-	'>>' -> 30;
-	'<' -> 40;
-	'<=' -> 40;
-	'>' -> 40;
-	'>=' -> 40;
-	'==' -> 50;
-	'!=' -> 50;
-	'&' -> 60;
-	'^' -> 70;
-	'|' -> 80;
-	'&&' -> 90;
-	'||' -> 100;
-	'='  -> 120;
-	'+='  -> 120;
-	'-='  -> 120;
-	'*='  -> 120;
-	'/='  -> 120;
-	'%='  -> 120;
-	'>>='  -> 120;
-	'<<='  -> 120;
-	'&='  -> 120;
-	'^='  -> 120;
-	'|='  -> 120;
-	','  -> 130
-    end;
-prio(#bic_ifexpr{}) -> 
-    110;
-prio(_) ->
-    false.
-
--spec format_expr(Expr::bic_expr()) -> string().
-
-format_expr(X) when is_integer(X) -> integer_to_list(X);
-format_expr(#bic_id{name=Name}) -> Name;
-format_expr(#bic_constant{token=Value}) -> Value;
-
-format_expr(#bic_unary{op='+++',arg=Arg}) -> 
-    [format_expr(Arg),"++"];
-format_expr(#bic_unary{op='---',arg=Arg}) -> 
-    [format_expr(Arg),"--"];
-format_expr(#bic_unary{op=sizeof,arg=Arg}) -> 
-    %% fixme: Arg is either expression or type!
-    ["sizeof(", 
-     try format_expr(Arg) of
-	 X -> X
-     catch
-	 error:_ ->
-	     format_type(Arg)
-     end, ")"];
-format_expr(#bic_unary{op=Op,arg=Arg}) -> 
-    [atom_to_list(Op),format_expr(Arg)];
-format_expr(#bic_binary{op='[]',arg1=Arg1,arg2=Arg2}) -> 
-    [format_expr(Arg1),"[",format_expr(Arg2),"]"];
-format_expr(#bic_binary{op=cast,arg1=Type,arg2=Arg2}) -> 
-    ["(",format_type(Type),")",format_expr(Arg2)];    
-format_expr(X=#bic_binary{op=Op,arg1=Arg1,arg2=Arg2}) -> 
-    P  = prio(X),
-    P1 = prio(Arg1),
-    P2 = prio(Arg1),
-    [if is_number(P),is_number(P1),P1 > P -> 
-	     ["(",format_expr(Arg1), ")"];
-	true -> format_expr(Arg1)
-     end,
-     atom_to_list(Op),
-     if is_number(P),is_number(P2),P2 > P ->
-	     ["(",format_expr(Arg2), ")"];
-	true ->
-	     format_expr(Arg2)
-     end];
-format_expr(#bic_call{func=F, args=Exprs}) ->
-    [format_expr(F),"(",format_exprs(Exprs),")"];
-format_expr(#bic_ifexpr{test=C,then=T,else=E}) ->
-    [format_expr(C),"?",format_expr(T),":",format_expr(E)];
-format_expr(#bic_assign{op=Op,lhs=L,rhs=R}) ->
-    [format_expr(L),atom_to_list(Op),format_expr(R)];
-format_expr(Array) when is_list(Array) -> %% array init?
-    ["{", format_exprs(Array), "}"].
-
--spec format_exprs(ExprList::[bic_expr()]) -> string().
-
-format_exprs([]) -> [];
-format_exprs([X]) -> [format_expr(X)];
-format_exprs([X|Xs]) -> [format_expr(X),",",format_exprs(Xs)].
-
-format_definitions([]) ->
-    [];
-format_definitions([D|Ds]) ->
-    [format_definition(D) |
-     format_definitions(Ds)];
-format_definitions(D) ->
-    format_definition(D).
-
-format_definition(D) ->
-    case D of
-	#bic_function{name=Name,storage=Storage,type=Type,
-		      params=Params,body=Body} ->
-	    [format_storage(Storage),format_type(Type),format_dim(Type)," ",Name,
-	     "(",format_params(Params),")", "\n",
-	     format_statement(Body, 0)];
-	#bic_typedef{name=Name,storage=Storage,type=Type,size=Size,value=_Init} ->
-	    ["typedef ", format_storage(Storage),format_type(Type),
-	     format_size(Size)," ",Name,format_dim(Type),";\n"];
-	#bic_decl{} ->
-	    [format_decl(D),";\n"]
-    end.
-
-indent(I) when I =< 0 -> 
-    "";
-indent(I) ->
-    lists:duplicate(2*I, $\s).
-
-format_statement(Stmt) ->
-    format_statement(Stmt, 0).
-
-format_statement(#bic_compound{code=Stmts}, I) when is_list(Stmts) ->
-    format_icompound(Stmts,I);
-format_statement(Stmts, I) when is_list(Stmts) -> %% allow list as compound?
-    format_icompound(Stmts,I);
-format_statement(Stmt, I) ->
-    [indent(I),
-     case Stmt of
-	 #bic_for{init=Init,test=Test,update=Update,body=Body} ->
-	     ["for ", "(", 
-	      format_expr(Init), ";", 
-	      format_expr(Test), ";",
-	      format_expr(Update), ") ",
-	      format_body(Body,I+1)];
-	 #bic_while{test=Test,body=Body} ->
-	     ["while ", "(", 
-	      format_expr(Test), ") ",
-	      format_body(Body,I+1)];
-	 #bic_do{body=Body, test=Test} ->
-	     ["do ", format_body(Body,I+1),
-	      "(", format_expr(Test), ")", ";\n" ];
-	 #bic_if{test=Test,then=Then,else=undefined} ->
-	     ["if ", "(", format_expr(Test), ")",
-	      format_body(Then,I+1)];
-	 #bic_if{test=Test,then=Then,else=Else} ->
-	     ["if ", "(", format_expr(Test), ")",
-	      format_body(Then,I+1),
-	      " else ", 
-	      format_body(Else,I+1)];
-	 #bic_switch{expr=Expr,body=Body} ->
-	     ["switch ", "(", format_expr(Expr), ")",
-	      format_statement(Body,I+1)];
-	 #bic_case{expr=Expr, code=Code} ->
-	     ["case ", format_expr(Expr), ": ",
-	      format_statement(Code,I+1)];
-	 #bic_default{code=Code} ->
-	     ["default", ": ",
-	      format_statement(Code,I+1)];
-	 #bic_label{name=Label, code=Code} ->
-	     [Label, ": ", format_statement(Code,I+1)];
-	 #bic_continue{} ->
-	     ["continue", ";\n"];
-	 #bic_break{} ->
-	     ["break", ";\n"];
-	 #bic_return{expr=undefined} ->
-	     ["return", ";\n"];
-	 #bic_return{expr=Expr} ->
-	     ["return", " ", format_expr(Expr), ";\n"];
-	 #bic_empty{} ->
-	     [";\n"];
-	 #bic_decl{name=Name,type=Type,size=Size,value=Init} ->
-	     [format_type(Type)," ",Name,format_dim(Type),
-	      format_size(Size),format_init(Init),";\n"];
-	 Expr ->
-	     [format_expr(Expr), ";\n"]
-     end].
-
-format_body(#bic_compound{code=Stmts}, I) when is_list(Stmts) ->
-    format_compound(Stmts, I);
-format_body(Stmts, I) when is_list(Stmts) ->
-    format_compound(Stmts, I);
-format_body(Stmt, I) ->
-    ["\n", format_statement(Stmt,I)].
-
-%% compound body for for/while/...
-format_compound(Stmts, I) when is_list(Stmts) ->
-    ["{","\n",
-     format_statements(Stmts, I+1),
-     indent(I-1),"}\n"].
-
-%% compound body for block code, functions ...
-format_icompound(Stmts, I) when is_list(Stmts) ->
-    [indent(I),"{","\n",
-     format_statements(Stmts, I+1),
-     indent(I),"}\n"].
-
-format_statements([], _I) ->    
-    [];
-format_statements([Stmt], I) ->    
-    [format_statement(Stmt, I)];
-format_statements([Stmt|Stmts], I) ->
-    [format_statement(Stmt, I) |
-     format_statements(Stmts, I)].
-
 %% convert constants
 token_to_integer([$0,$x|Value]) -> token_to_integer_(Value, 16);
 token_to_integer([$0,$X|Value]) -> token_to_integer_(Value, 16);
@@ -767,15 +517,90 @@ token_to_integer_(Suffix, _Base, Val) ->
 	end,
     {Val, T}.
 
-%% fixme: handle suffix
-token_to_float(String) ->
-    {list_to_float(string:trim(String,trailing,"fFlL")),
-     #bic_type { const=true, type=double }}.
+token_to_float(Cs) ->
+    Cs2 = case Cs of
+	      [$.|Cs1] -> [$0,$.|Cs1];
+	      _ -> Cs
+	  end,
+    float_suffix(lists:reverse(string:to_lower(Cs2)),
+		 #bic_type{const=true,type=double}).
 
-%% return char/wchar_t
-token_to_char([$',Val,$']) ->
-    {Val, #bic_type{ const=true, type=char} }.
+float_suffix([$f|Cs], Type) ->
+    float_suffix(Cs, Type#bic_type{type=float});
+float_suffix([$l|Cs], Type) ->
+    float_suffix(Cs, Type#bic_type{size=long});
+float_suffix(Cs, Type) ->
+    {list_to_float(lists:reverse(Cs)), Type}.
 
-%% fixme: check for utf8 interpret escape seqeunces
+%% fixme wchar_t
+token_to_char([$',$\\|Cs]) ->
+    {Val,[$']} = escape(Cs),
+    {Val, #bic_type{ const=true, type=char} };
+token_to_char([$',C,$']) ->
+    {C, #bic_type{ const=true, type=char} }.
+
+%% fixme wchar_t
 token_to_string(Token) ->
-    {Token, #bic_type{ const=true, type=char}}.
+    token_to_string_(Token, [], #bic_type{ const=true, type=char}).
+
+token_to_string_([$\\|Cs], Acc, Type) ->
+    {C,Cs1} = escape(Cs),
+    token_to_string_(Cs1, [C|Acc], Type);
+token_to_string_([C|Cs], Acc, Type) ->
+    token_to_string_(Cs, [C|Acc], Type);
+token_to_string_([], Acc, Type) ->
+    {lists:reverse(Acc), Type}.
+
+-define(is_hex(C), 
+	((((C)>=$0) andalso ((C)=<$9)) 
+	 orelse
+	   (((C)>=$a) andalso ((C)=<$f))
+	 orelse
+	   (((C)>=$A) andalso ((C)=<$F)))).
+
+%% after \ 
+escape([$a|Cs]) -> {16#07, Cs};
+escape([$b|Cs]) -> {16#08, Cs};
+escape([$e|Cs]) -> {16#1B, Cs};
+escape([$f|Cs]) -> {16#0C, Cs};
+escape([$n|Cs]) -> {16#0A, Cs};
+escape([$r|Cs]) -> {16#0D, Cs};
+escape([$t|Cs]) -> {16#09, Cs};
+escape([$v|Cs]) -> {16#0B, Cs};
+escape([$\\|Cs]) -> {16#5C, Cs};
+escape([$\'|Cs]) -> {16#27, Cs};
+escape([$\"|Cs]) -> {16#22, Cs};
+escape([$\?|Cs]) -> {16#3F, Cs};
+escape([N2,N1,N0|Cs]) when 
+      (N2>=$0),(N2=<$3),(N1>=$0),(N1=<$7),(N0>=$0),(N0=<$7) ->
+    {(N2-$0)*64+(N1-$0)*8+(N0-$0), Cs};
+escape([N1,N0|Cs]) when 
+      (N1>=$0),(N1=<$7),(N0>=$0),(N0=<$7) ->
+    {(N1-$0)*8+(N0-$0), Cs};
+escape([N0|Cs]) when 
+      (N0>=$0),(N0=<$7) ->
+    {(N0-$0), Cs};
+escape([$x|Cs]) ->
+    escape_hex(Cs);
+escape([$u,X1,X2,X3,X4|Cs]) when 
+      ?is_hex(X1),?is_hex(X2),?is_hex(X3),?is_hex(X4) ->
+    {list_to_integer([X1,X2,X3,X4],16), Cs};
+escape([$U,X1,X2,X3,X4,X5,X6,X7,X8|Cs]) when 
+      ?is_hex(X1),?is_hex(X2),?is_hex(X3),?is_hex(X4),
+      ?is_hex(X5),?is_hex(X6),?is_hex(X7),?is_hex(X8) ->
+    {list_to_integer([X1,X2,X3,X4,X5,X6,X7,X8],16), Cs};
+escape([C|Cs]) ->
+    {C,Cs}.
+
+escape_hex([C|Cs]) when ?is_hex(C) ->
+    escape_hex(Cs, [C]).
+
+escape_hex([C|Cs],Acc) when ?is_hex(C) ->
+    escape_hex(Cs,[C|Acc]);
+escape_hex(Cs, Acc) ->
+    {list_to_integer(lists:reverse(Acc),16), Cs}.
+
+
+
+    
+

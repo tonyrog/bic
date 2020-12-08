@@ -430,7 +430,7 @@ statement_list -> statement : ['$1'].
 statement_list -> statement_list statement : '$1' ++ ['$2'].
 
 expression_statement -> ';' : #bic_empty{line=line('$1')}.
-expression_statement -> expr ';' : '$1'.
+expression_statement -> expr ';' : #bic_expr_stmt{line=line('$1'),expr='$1'}.
 
 selection_statement -> 'if' '(' expr ')' statement :
 	    #bic_if {line=line('$1'),test='$3',then='$5'}.

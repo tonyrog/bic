@@ -28,46 +28,33 @@
 	 warnings = []
 	}).
 
-forms(Filename,Forms) ->
-    %% io:format("Forms:\n~p\n", [Forms]),
-    {CForms,Scope} = forms_(Forms, [], new_scope(Filename)),
+definitions(Filename,Defs) ->
+    %% io:format("Defs:\n~p\n", [Defs]),
+    {CDefs,Scope} = definitions_(Defs, [], new_scope(Filename)),
     if Scope#scope.errors =:= [] ->
 	    report(Scope#scope.filename, Scope#scope.warnings),
-	    {ok,CForms};
+	    {ok,CDefs};
        true ->
 	    report(Scope#scope.filename,
 		   Scope#scope.warnings++Scope#scope.errors),
 	    {error, lint}
     end.
 
-forms_(undefined, _Acc, S) ->
-    {undefined, S};
-forms_(Stmt, _Acc, S) when is_tuple(Stmt) ->
-    statement(Stmt, S);
-forms_([F=#bic_typedef { line=Ln, name=Name } | Fs], Acc, S0) ->
+definitions_([F=#bic_typedef { line=Ln, name=Name } | Fs], Acc, S0) ->
     {CTypedef,S1} = typedef(F,S0),
     case find_local_type(Name, S1) of
 	error ->
 	    S2 = store_type(Name, CTypedef, S1),
-	    forms_(Fs, [CTypedef|Acc], S2);
+	    definitions_(Fs, [CTypedef|Acc], S2);
 	{ok,_} ->
 	    S2 = add_warning(S1, Ln, "type ~s already defined", [Name]),
 	    S3 = store_type(Name, CTypedef, S2),
-	    forms_(Fs, [CTypedef|Acc], S3)
+	    definitions_(Fs, [CTypedef|Acc], S3)
     end;
-forms_([D=#bic_decl{}| Fs], Acc, S0) ->
+definitions_([D=#bic_decl{}| Fs], Acc, S0) ->
     {CDecl,S1} = decl(D, S0),
-    forms_(Fs, [CDecl|Acc], S1);
-forms_([F=#bic_struct{}|Fs], Acc, S0) ->
-    {CStruct, S1} = struct(F, S0),
-    forms_(Fs, [CStruct|Acc], S1);
-forms_([F=#bic_union{}|Fs], Acc, S0) ->
-    {CUnion, S1} = union(F, S0),
-    forms_(Fs, [CUnion|Acc], S1);
-forms_([F=#bic_enum{}|Fs], Acc, S0) ->
-    {CEnum, S1} = enum(F, S0),
-    forms_(Fs, [CEnum|Acc], S1);
-forms_([F=#bic_function {line=Ln,name=Name} | Fs], Acc, S0) ->
+    definitions_(Fs, [CDecl|Acc], S1);
+definitions_([F=#bic_function {line=Ln,name=Name} | Fs], Acc, S0) ->
     {CType,S1} = type(F#bic_function.type,Ln,S0),
     S2 = push_scope(S1),
     {CArgs,S3} = decls(F#bic_function.params, S2),
@@ -79,58 +66,60 @@ forms_([F=#bic_function {line=Ln,name=Name} | Fs], Acc, S0) ->
     S40 = S400#scope{ func = Func0 }, %% current function
     %% {CParams,S3} = decls(F#bic_functions.params, S2),  %% merge?
     S41 = push_scope(S40),
-    {CBody,S42} = forms_(F#bic_function.body, [], clear_labels(S41)),
+    {CBody,S42} = statement_list(F#bic_function.body, [], clear_labels(S41)),
     %% CBody1 = resolve_labels(CBody, S4)
     S43 = pop_scope(S42),
     S5 = pop_scope(S43),
     Func = F#bic_function { type=CType, params=CArgs, body=CBody },
     CDecl = #bic_decl { line=Ln, name=Name, type=CType, value=Func },
     S6 = store_decl(Name, CDecl, S5),
-    forms_(Fs, [Func | Acc], S6#scope{ func=undefined} );
-forms_([F | Fs], Acc, S) ->
-    {CStmt, S1} = statement(F, S),
-    forms_(Fs, [CStmt|Acc], S1);
-forms_([], Acc, S) ->
+    definitions_(Fs, [Func | Acc], S6#scope{ func=undefined} );
+definitions_([], Acc, S) ->
     {lists:reverse(Acc), S}.
 
-statement(Y=#bic_empty{}, S) ->
-    {Y, S};
+statement(undefined, S) -> %% empty else for example
+    {undefined, S};
+statement(Y=#bic_expr_stmt{expr=Expr}, S0) ->
+    {CExpr,S1} = expr(Expr, S0),
+    {Y#bic_expr_stmt{expr=CExpr}, S1};
+statement(Y=#bic_decl{}, S0) ->
+    decl(Y, S0);
 statement(#bic_if { line=Ln,test=Test,then=Then,else=Else},S0) ->
     {CTest,S1} = expr(Test,S0),
-    {CThen,S2} = forms_(Then,[],S1),
-    {CElse,S3} = forms_(Else,[],S2),
+    {CThen,S2} = statement(Then,S1),
+    {CElse,S3} = statement(Else,S2),
     CIf = #bic_if { line=Ln,test=CTest, then=CThen, else=CElse },
     {CIf,S3};
 statement(Y=#bic_for{ init=Init,test=Test,update=Update,body=Body},S0) ->
     {CInit,S1} = expr(Init,S0),
     {CTest,S2} = expr(Test,S1),
     {CUpdate,S3} = expr(Update,S2),
-    {CBody,S4} = forms_(Body,[],push_scope(S3,for)),
+    {CBody,S4} = statement(Body,push_scope(S3,for)),
     CFor = Y#bic_for { init=CInit,test=CTest,update=CUpdate,body=CBody},
     {CFor,pop_scope(S4)};
 statement(Y=#bic_while { test=Test, body=Body },S0) ->
     {CTest,S1} = expr(Test,S0),
-    {CBody,S2} = forms_(Body,[],push_scope(S1,while)),
+    {CBody,S2} = statement(Body,push_scope(S1,while)),
     CWhile = Y#bic_while { test=CTest,body=CBody},
     {CWhile,pop_scope(S2)};
 statement(Y=#bic_do { body=Body, test=Test },S0) ->
     {CTest,S1} = expr(Test,S0),
-    {CBody,S2} = forms_(Body,[],push_scope(S1,do)),
+    {CBody,S2} = statement(Body,push_scope(S1,do)),
     CWhile = Y#bic_do { body=CBody, test=CTest },
     {CWhile,pop_scope(S2)};
 statement(Y=#bic_switch { expr=Expr, body=Body },S0) ->
     {CExpr,S1} = expr(Expr,S0),
-    {CBody,S2} = forms_(Body,[],push_scope(S1,switch)),
+    {CBody,S2} = statement(Body,push_scope(S1,switch)),
     CSwitch = Y=#bic_switch { expr=CExpr, body=CBody },
     {CSwitch,pop_scope(S2)};
 statement(Y=#bic_label { name = Name, code = Code }, S0) ->
-    {CCode,S1} = forms_(Code,[],S0),
+    {CCode,S1} = statement(Code,S0),
     S1 = add_label(Name, S0),
     CLabel = Y#bic_label { code=CCode },
     {CLabel, S1};
 statement(Y=#bic_case { expr = Expr, code = Code }, S0) ->
     {CExpr,S1} = expr(Expr,S0),
-    {CCode,S2} = forms_(Code,[],S1),
+    {CCode,S2} = statement(Code,S1),
     CCase = Y#bic_case { expr=CExpr, code=CCode },
     {CCase, S2};
 statement(Y=#bic_goto { label=_Name }, S0) ->
@@ -177,16 +166,15 @@ statement(Y=#bic_return { line=Ln,expr=Expr}, S0) ->
 	end,
     CReturn = Y#bic_return { expr = CExpr },
     {CReturn, S3};
+statement(Y=#bic_empty{}, S) ->
+    {Y, S};
 statement(Y=#bic_compound{code=Stmts}, S0) ->
     {Stmts1,S1} = compound(Stmts, [], S0),
-    {Y#bic_compound{code=Stmts1}, S1};
-statement(Expr, S0) when is_tuple(Expr) ->
-    expr(Expr, S0).
-
+    {Y#bic_compound{code=Stmts1}, S1}.
 
 compound(Stmts, Acc, S0) ->
     S1 = push_scope(S0),
-    {Stmts1,S2} = forms_(Stmts, Acc, S1),
+    {Stmts1,S2} = statement_list(Stmts, Acc, S1),
     S3 = pop_scope(S2),
     {Stmts1,S3}.
 
@@ -392,20 +380,21 @@ expr(X=#bic_id { line=Ln, name=Name }, S0) ->
 	    { X#bic_id { type=CDecl#bic_decl.type }, S0}
     end;
 expr(X=#bic_unary { line=Ln, op=sizeof, arg=Arg }, S0) ->
-    {SzArg,S2} = try expr(Arg, S0) of
-		     {X1,S1} -> {typeof(X1), S1}
-		 catch
-		     error:_ ->
+    {SzArg,S2} = case bic:is_expr(Arg) of
+		     true -> 
+			 {Arg1,S1} = expr(Arg,S0),
+			 {typeof(Arg1),S1};
+		     false ->
 			 type(Arg,Ln,S0)
 		 end,
     {X#bic_unary{ type=sizeof_type(Ln), arg=SzArg }, S2};
-expr(X=#bic_unary { line=Ln, op=typeof, arg=Type }, S0) ->
-    %% typeof(expr | type)
-    {Type1,S2} = try expr(Type, S0) of
-		     {X1,S1} -> {typeof(X1),S1}
-		 catch
-		     error:_ ->
-			 type(Type,Ln,S0)
+expr(X=#bic_unary { line=Ln, op=typeof, arg=Arg }, S0) ->
+    {Type1,S2} = case bic:is_expr(Arg, S0) of
+		     true ->
+			 {Arg1,S1} = expr(Arg,S0),
+			 {typeof(Arg1),S1};
+		     false ->
+			 type(Arg,Ln,S0)
 		 end,
     {X#bic_unary{ arg=Type1 }, S2};
 expr(X=#bic_unary { line=Ln, op=Op, arg=Arg}, S0) ->
@@ -453,51 +442,6 @@ expr_list_([X|Xs],S0,Acc) ->
 expr_list_([],Si,Acc) ->
     {lists:reverse(Acc),Si}.
 
-is_compare_op('<') -> true;
-is_compare_op('<=') -> true;
-is_compare_op('>') -> true;
-is_compare_op('>=') -> true;
-is_compare_op('==') -> true;
-is_compare_op('!=') -> true;
-is_compare_op(_) -> false.
-
-is_logical_op('&&') -> true;
-is_logical_op('||') -> true;
-is_logical_op('!') -> true;
-is_logical_op(_) -> false.
-
-is_bitwise_op('&') -> true;
-is_bitwise_op('|') -> true;
-is_bitwise_op('^') -> true;
-is_bitwise_op('~') -> true;
-is_bitwise_op(_) -> false.
-
-is_shift_op('>>') -> true;
-is_shift_op('<<') -> true;
-is_shift_op(_) -> false.
-    
-is_integer_op('+') -> true;
-is_integer_op('-') -> true;
-is_integer_op('*') -> true; 
-is_integer_op('/') -> true; 
-is_integer_op('%') -> true; 
-is_integer_op(Op) ->
-    is_bitwise_op(Op) orelse
-	is_shift_op(Op) orelse
-	is_logical_op(Op) orelse
-	is_compare_op(Op).
-
-is_float_op('+') -> true;
-is_float_op('-') -> true;
-is_float_op('*') -> true;
-is_float_op('/') -> true;
-is_float_op(_) -> false.
-    
-is_pointer_op('+') -> true;
-is_pointer_op('-') -> true;
-is_pointer_op('++') -> true;
-is_pointer_op('--') -> true;
-is_pointer_op(Op) -> is_compare_op(Op).
 
 check_type(Ln, Op, T, S) ->
     if Op =:= '~'; Op =:= '!' ->

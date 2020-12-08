@@ -239,6 +239,11 @@ fold(Fun, Acc0, Form) ->
 	    {V1,Acc2} = fold(Fun, Acc1, V),
 	    Form1 = Form#bic_decl{type=T1,value=V1},
 	    Fun(Form1,Acc2);
+	%% STATEMENTS
+	#bic_expr_stmt{expr=Expr} ->
+	    {Expr1,Acc1} = fold(Fun, Acc0, Expr),
+	    Form1 = Form#bic_expr_stmt{expr=Expr1},
+	    Fun(Form1,Acc1);
 	#bic_for{init=I,test=T,update=U,body=B} ->
 	    {I1,Acc1} = fold(Fun, Acc0, I),
 	    {T1,Acc2} = fold(Fun, Acc1, T),
@@ -246,7 +251,6 @@ fold(Fun, Acc0, Form) ->
 	    {B1,Acc4} = fold(Fun, Acc3, B),
 	    Form1 = Form#bic_for{init=I1,test=T1,update=U1,body=B1},
 	    Fun(Form1,Acc4);
-	%% STATEMENTS
 	#bic_while{test=C,body=B} ->
 	    {C1,Acc1} = fold(Fun, Acc0, C),
 	    {B1,Acc2} = fold(Fun, Acc1, B),
@@ -296,17 +300,17 @@ fold(Fun, Acc0, Form) ->
 	#bic_compound{line=Line,code=Stmts} when is_list(Stmts) ->
 	    {Stmts1,Acc1} = fold_compound(Fun,Acc0,Line,Stmts),
 	    Form1 = Form#bic_compound{code=Stmts1},
-	    Fun(Form1,Acc1);
+	    Fun(Form1,Acc1)
 	%% alternate compound form, needed?
-	[] ->
-	    {Form,Acc0};
-	_ when is_list(Form) ->
-	    Line = element(2,hd(Form)), %% is this the line number?
-	    {Form1,Acc1} = fold_compound(Fun,Acc0,Line,Form),
-	    Fun(Form1,Acc1);
+	%% [] ->
+	%% {Form,Acc0};
+	%% _ when is_list(Form) ->
+	%% Line = element(2,hd(Form)), %% is this the line number?
+	%% {Form1,Acc1} = fold_compound(Fun,Acc0,Line,Form),
+	%%     Fun(Form1,Acc1);
 	%% unknown or ignored,
-	_ ->
-	    {Form,Acc0}
+	%% _ ->
+	%% {Form,Acc0}
     end.
 
 fold_compound(_Fun, Acc, _Line, undefined) -> %% undefine body, declaration

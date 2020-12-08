@@ -8,15 +8,17 @@
 -ifndef(__BIC_HRL__).
 -define(__BIC_HRL__, true).
 
+-type bic_definition() ::
+	bic_typedef() |
+	bic_decl() |
+	bic_function().
+
+-type bic_definitions() :: [bic_definition()].
 -type bic_type() ::
-	bic_typeid() |
 	bic_typespec() |
-	bic_enum() |
 	bic_pointer() |
 	bic_array() |
-	bic_fn() |
-	bic_struct() |
-	bic_union().
+	bic_fn().
 
 -type bic_expr() ::
 	bic_id() |
@@ -28,7 +30,7 @@
 	bic_assign().
 
 -type bic_statement() ::
-	bic_expr() |  %% expression statement
+	bic_expr_stmt() |
 	bic_decl() |
 	bic_for() |
 	bic_while() |
@@ -51,7 +53,6 @@
 
 -type bic_forms() ::
 	[bic_declaration()].
-
 
 -type bic_storage() :: undefined | auto | static | register | extern.
 -type bic_sign()    :: undefined | signed | unsigned.
@@ -78,8 +79,8 @@
 		      bic_struct() | bic_union() | bic_typeid() | bic_enum() |
 		      bic_pointer()
 	}).
--type bic_typespec() :: #bic_type{} | bic_struct() | bic_union() |
-			bic_typeid() | bic_enum().
+-type bic_typespec() :: #bic_type{} | bic_typeid() | bic_enum() |
+			bic_struct() | bic_union().
 
 -record(bic_enum,
 	{
@@ -89,7 +90,6 @@
 	}).
 -type bic_enum() :: #bic_enum{}.
 
-%% Pointer type
 -record(bic_pointer,
 	{
 	 line      :: integer(),
@@ -244,6 +244,13 @@
 	 value :: bic_expr()  %% optional init value
 	}).
 -type bic_decl() :: #bic_decl{}.
+
+-record(bic_expr_stmt,
+	{
+	 line :: integer(),
+	 expr :: bic_expr()
+	}).
+-type bic_expr_stmt() :: #bic_expr_stmt{}.
 
 %% Function declaration
 -record(bic_function,
