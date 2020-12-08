@@ -32,7 +32,7 @@ definitions(Ds, Fs) ->
 	  fun(#bic_function{name=Name}) -> lists:member(Name, Fs) end, S0),
     %% extract all calls from S2
     {_,Calls} = 
-	bic_transform:fold(
+	bic_transform:fold_list(
 	  fun(F=#bic_call{func=#bic_id{name=Name}}, Set) ->
 		  {F,Set#{ Name => true }};
 	     (F,Set) -> 

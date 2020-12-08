@@ -23,6 +23,15 @@
 -export([is_float_op/1]).
 -export([is_pointer_op/1]).
 
+-export([is_int_type/1]).
+-export([is_number_type/1]).
+-export([is_address_type/1]).
+-export([is_array_type/1]).
+-export([is_pointer_type/1]).
+-export([base_typeof/1]).
+-export([typeof/1]).
+-export([lineof/1]).
+
 -export([combine_types/2]).
 -export([complete_type/1]).
 -export([token_to_integer/1, token_to_integer/2]).
@@ -140,7 +149,7 @@ add_pass(Pass,Opts) ->
     Fs = get_opt(func,Opts,[]),
     Ps1 = Ps++[{Pass,Fs}],
     Opts1 = set_opt(pass,Ps1,Opts),
-    set_opt(func,Opts1,[]).
+    set_opt(func,[],Opts1).
 
 get_opt(Key, Opts, Default) when is_atom(Key) ->
     maps:get(Key, Opts, Default).
@@ -279,7 +288,7 @@ parse(Filename, Opts) ->
     CppOpts = maps:get(cpp, Opts, []),
     CppOpts1 = [{define,"__bic__", 1},
 		{define,"__bic_extension_bitfield__", 1} | CppOpts],
-    io:format("filename = ~p, cppopts=~p\n", [Filename, CppOpts1]),
+    %% io:format("filename = ~p, cppopts=~p\n", [Filename, CppOpts1]),
     case bic_cpp:open(Filename, CppOpts1) of
 	{ok,Fd} ->
 	    bic_scan:init(),  %% setup some dictionay stuff
@@ -347,6 +356,7 @@ is_type(#bic_array{}) -> true;
 is_type(#bic_fn{}) -> true;
 is_type(T) -> is_typespec(T).
 
+is_statement(#bic_typedef{}) -> true;
 is_statement(#bic_decl{}) -> true;
 is_statement(#bic_for{}) -> true;
 is_statement(#bic_while{}) -> true;
@@ -410,6 +420,85 @@ is_pointer_op('-') -> true;
 is_pointer_op('++') -> true;
 is_pointer_op('--') -> true;
 is_pointer_op(Op) -> is_compare_op(Op).
+
+typeof(#bic_constant{type=Type}) -> Type;
+typeof(#bic_id     {type=Type}) -> Type;
+typeof(#bic_unary  {type=Type}) -> Type;
+typeof(#bic_binary {type=Type}) -> Type;
+typeof(#bic_call   {type=Type}) -> Type;
+typeof(#bic_assign {type=Type}) -> Type;
+typeof(#bic_ifexpr {type=Type}) -> Type.
+
+%% types
+lineof(#bic_type{line=L}) -> L;
+lineof(#bic_struct{line=L}) -> L;
+lineof(#bic_union{line=L}) -> L;
+lineof(#bic_typeid{line=L}) -> L;
+lineof(#bic_enum{line=L}) -> L;
+lineof(#bic_pointer{line=L}) -> L;
+lineof(#bic_array{line=L}) -> L;
+lineof(#bic_fn{line=L}) -> L;
+%% statements
+lineof(#bic_decl{line=L}) -> L;
+lineof(#bic_for{line=L}) -> L;
+lineof(#bic_while{line=L}) -> L;
+lineof(#bic_do{line=L}) -> L;
+lineof(#bic_if{line=L}) -> L;
+lineof(#bic_switch{line=L}) -> L;
+lineof(#bic_case{line=L}) -> L;
+lineof(#bic_default{line=L}) -> L;
+lineof(#bic_label{line=L}) -> L;
+lineof(#bic_goto{line=L}) -> L;
+lineof(#bic_continue{line=L}) -> L;
+lineof(#bic_break{line=L}) -> L;
+lineof(#bic_return{line=L}) -> L;
+lineof(#bic_empty{line=L}) -> L;
+lineof(#bic_compound{line=L}) -> L;
+lineof(#bic_expr_stmt{line=L}) -> L;
+%% expressions
+lineof(#bic_constant {line=Line}) -> Line;
+lineof(#bic_id {line=Line}) -> Line;
+lineof(#bic_unary {line=Line}) -> Line;
+lineof(#bic_binary {line=Line}) -> Line;
+lineof(#bic_call {line=Line}) -> Line;
+lineof(#bic_assign {line=Line}) -> Line;
+lineof(#bic_ifexpr {line=Line}) -> Line.
+
+base_typeof(#bic_pointer{type=Type}) -> Type;
+base_typeof(#bic_array{type=Type}) -> Type.
+
+
+is_int_type(#bic_type{type=T}) ->
+    case T of
+	char -> true;
+	int -> true;
+	#bic_enum{} -> true;
+	_ -> false
+    end;
+is_int_type(#bic_enum{}) -> true;
+is_int_type(_) -> false.
+
+
+is_number_type(#bic_type{type=T}) ->
+    case T of
+	int -> true;
+	float -> true;
+	double -> true;
+	#bic_enum{} -> true;
+	_ -> false
+    end;
+is_number_type(#bic_enum{}) -> true;
+is_number_type(_) -> false.
+
+
+is_address_type(Type) ->
+    is_array_type(Type) orelse is_pointer_type(Type).
+
+is_array_type(#bic_array{}) -> true;
+is_array_type(_) -> false.
+
+is_pointer_type(#bic_pointer{}) -> true;
+is_pointer_type(_) -> false.
 
 %% fill in some blanks in types!
 %% long => long int
@@ -643,8 +732,3 @@ escape_hex([C|Cs],Acc) when ?is_hex(C) ->
     escape_hex(Cs,[C|Acc]);
 escape_hex(Cs, Acc) ->
     {list_to_integer(lists:reverse(Acc),16), Cs}.
-
-
-
-    
-

@@ -51,8 +51,8 @@ definitions_([D|Ds],Fs,Acc,E0) ->
 	    {D1,E1} = definition(D, E0),
 	    definitions_(Ds,Fs,[D1|Acc],E1)
     end;
-definitions_([], _Fs, Acc, E) ->
-    {lists:reverse(Acc), E}.
+definitions_([], _Fs, Acc, _E) ->
+    lists:reverse(Acc).
 
 definition(D=#bic_function{name=Fun, params=Params, body=Code}, E) ->
     E0 = push_env(E),
@@ -72,9 +72,15 @@ definition(D=#bic_function{name=Fun, params=Params, body=Code}, E) ->
 definition(D=#bic_decl{name=Var,type=Type,value=Expr}, E) ->
     E1 = decl(Var,E,Type),
     {Expr1, E2} = expr(Expr, E1),
-    {D#bic_decl{value=Expr1}, set_value(Var, E2, Expr1)}.
+    {D#bic_decl{value=Expr1}, set_value(Var, E2, Expr1)};
+definition(D=#bic_typedef{}, E) ->
+    %% FIXME: introduce type ! in env.
+    {D, E}.
 
 %% for (init, cond, update)
+statement(S=#bic_expr_stmt{expr=Expr}, E) ->
+    {Expr1, E1} = expr(Expr, E),
+    {S#bic_expr_stmt{expr=Expr1}, E1};
 statement(S=#bic_for{},E) ->
     for(S,E);
 statement(S=#bic_while{},E) ->
@@ -82,30 +88,29 @@ statement(S=#bic_while{},E) ->
 statement(S=#bic_do{},E) ->
     do(S,E);
 statement(S=#bic_if {test=Cond,then=Then,else=undefined}, E) ->
-    {Value1,E1} = expr(Cond, E),
-    if is_integer(Value1), Value1 =/= 0; Value1 =:= true ->
+    {Cond1,E1} = expr(Cond, E),
+    if is_integer(Cond1), Cond1 =/= 0 ->
 	    statement(Then,E1);
-       is_integer(Value1), Value1 =:= 0; Value1 =:= false ->
+       is_integer(Cond1), Cond1 =:= 0 ->
 	    {#bic_empty{},E1};
        true ->
 	    {Then1,E2} = statement(Then,E1),
-	    {S#bic_if{test=Value1,then=Then1},E2}
+	    {S#bic_if{test=Cond1,then=Then1},E2}
     end;
 statement(S=#bic_if {test=Cond,then=Then,else=Else}, E) ->
-    {Value1,E1} = expr(Cond, E),
-    if is_integer(Value1), Value1 =/= 0; Value1 =:= true ->
+    {Cond1,E1} = expr(Cond, E),
+    if is_integer(Cond1), Cond1 =/= 0 ->
 	    statement(Then,E1);
-       is_integer(Value1), Value1 =:= 0; Value1 =:= false ->
+       is_integer(Cond1), Cond1 =:= 0 ->
 	    statement(Else,E1);
        true ->
 	    {Then1,E2} = statement(Then,E1),
 	    {Else1,E2} = statement(Else,E1), %% match E2!
-	    {S#bic_if{test=Value1,then=Then1,else=Else1},E2}
+	    {S#bic_if{test=Cond1,then=Then1,else=Else1},E2}
     end;
 statement(S=#bic_return{expr=Expr}, E) ->
     {Expr1, E1} = expr(Expr, E),
     {S#bic_return{expr=Expr1}, E1};
-
 statement(S=#bic_typedef{}, E) ->
     %% FIXME: introduce type ! in env.
     {S, E};
@@ -113,28 +118,26 @@ statement(S=#bic_decl{name=Var,type=Type,value=Expr}, E) ->
     E1 = decl(Var,E,Type),
     {Expr1, E2} = expr(Expr, E1),
     {S#bic_decl{value=Expr1}, set_value(Var, E2, Expr1)};
-
 statement(Const=#bic_constant{}, E) ->
     {Const,E};
-statement(A=#bic_assign{}, E) ->
-    expr(A,E);
-statement(A=#bic_call{}, E) ->
-    expr(A,E);
-statement(A=#bic_binary{}, E) ->
-    expr(A,E);
-statement(A=#bic_unary{}, E) ->
-    expr(A,E);
 statement(A=#bic_compound{code=Stmts},E) ->
     case compound(Stmts,E) of
 	{[],E1} ->
 	    {#bic_empty{}, E1};
-	{Stmts1,E1} ->
+	{[Stmt],E1} ->
+	    if is_record(Stmt,bic_typedef);
+	       is_record(Stmt,bic_decl) ->
+		    {#bic_empty{}, E1};
+	       true ->
+		    {Stmt,E1}
+	    end;
+	{Stmts1,E1} when is_list(Stmts1) ->
 	    {A#bic_compound{code=Stmts1},E1}
     end.
 
 compound(Code, E) when is_list(Code) ->
     E0 = push_env(E),
-    {Code1, E1} = statement_list(Code, E0),
+    {Code1, E1} = statement_list_(Code, E0),
     {Code1, pop_env(E1)}.
 
 statement_list(List, E) ->
@@ -156,23 +159,25 @@ statement_list_([], E) ->
     {[],E}.
 
 for(For=#bic_for{init=Init, test=Cond, update=Update, body=Code}, E) ->
-    {Init1,E1} = statement(Init, E),
-    for_(For,Cond,Update,Code,E1,[Init1]).
+    {Init1,E1} = expr(Init, E),
+    for_(For,Cond,Update,Code,E1,[expr_stmt(Init1)]).
 
 for_(For,Cond,Update,Code,E,Acc) ->
     {Cond1,E1} = expr(Cond, E),
     if is_integer(Cond1), Cond1 =/= 0 ->
 	    {Code1,E2} = statement(Code,E1),
-	    {Update1,E3} = statement(Update,E2),
-	    for_(For,Cond,Update,Code,E3,[Update1,Code1|Acc]);
+	    {Update1,E3} = expr(Update,E2),
+	    for_(For,Cond,Update,Code,E3,[expr_stmt(Update1),Code1|Acc]);
        is_integer(Cond1), Cond1 =:= 0 ->
-	    {lists:reverse(Acc), E1};
+	    {compound_stmt(lists:reverse(Acc)), E1};
        length(Acc) =:= 1 -> %% only init ignore unroll
 	    {_,E2} = unset_values(Code,E1),
 	    {For, E2};
        true -> %% loop a bit
 	    {_, E2} = unset_values(Code,E),
-	    {rcat(#bic_while{test=Cond,body=cat(Code,Update)},Acc), E2}
+	    Upd = expr_stmt(Update),
+	    Code1 = rcat(#bic_while{test=Cond,body=cat(Code,Upd)},Acc),
+	    {compound_stmt(Code1), E2}
     end.
 
 while(While=#bic_while{test=Cond, body=Code}, E) ->
@@ -184,13 +189,14 @@ while_(While, Cond, Code, E, Acc) ->
 	    {Code1,E2} = statement(Code,E1),
 	    while_(While, Cond, Code, E2, [Code1|Acc]);
        is_integer(Cond1), Cond1 =:= 0 ->
-	    {lists:reverse(Acc), E1};
+	    {compound_stmt(lists:reverse(Acc)), E1};
        Acc =:= [] ->
 	    {_,E2} = unset_values(Code,E1),
 	    {While, E2};
        true ->
 	    {_, E2} = unset_values(Code,E),
-	    {rcat(While#bic_while{test=Cond,body=Code},Acc), E2}
+	    Code1 = rcat(While#bic_while{test=Cond,body=Code},Acc),
+	    {compound_stmt(Code1), E2}
     end.
 
 do(Do=#bic_do{body=Code, test=Cond}, E) ->
@@ -202,13 +208,14 @@ do_(Do, Code, Cond, E, Acc) ->
     if is_integer(Cond1), Cond1 =/= 0 ->
 	    do_(Do,Code, Cond, E2, [Code1|Acc]);
        is_integer(Cond1), Cond1 =:= 0 ->
-	    {lists:reverse(Acc), E1};
+	    {compound_stmt(lists:reverse(Acc)), E1};
        Acc =:= [] ->
 	    {_,E3} = unset_values(Code,E),
 	    {Do, E3};
        true ->
 	    {_, E3} = unset_values(Code,E),
-	    {rcat(Do#bic_do{body=Code,test=Cond},Acc), E3}
+	    Code1 = rcat(Do#bic_do{body=Code,test=Cond},Acc),
+	    {compound_stmt(Code1), E3}
     end.
 
 cat(Code1,Code2) ->
@@ -242,6 +249,16 @@ rcat(Code1,Code2) ->
 	    end
     end.
 
+%% convert expression to statement
+expr_stmt(Expr) ->
+    #bic_expr_stmt{line=bic:lineof(Expr),expr=Expr}.
+
+compound_stmt([]) ->
+    #bic_empty{};
+compound_stmt(Stmt) when not is_list(Stmt) ->
+    Stmt;
+compound_stmt(Stmts=[Stmt|_]) ->
+    #bic_compound{line=bic:lineof(Stmt),code=Stmts}.
 
 -spec expr(bic_expr(), env()) ->
 	  {bic_expr()|value(), env()}.

@@ -160,7 +160,7 @@ statement(Y=#bic_return { line=Ln,expr=Expr}, S0) ->
 			  "return statement not in a function",
 			  []); 
 	   true ->
-		{_CType,S2}=check_type(Ln,'==',typeof(CExpr),
+		{_CType,S2}=check_type(Ln,'==',bic:typeof(CExpr),
 				       F#bic_function.type,S1),
 		S2
 	end,
@@ -383,7 +383,7 @@ expr(X=#bic_unary { line=Ln, op=sizeof, arg=Arg }, S0) ->
     {SzArg,S2} = case bic:is_expr(Arg) of
 		     true -> 
 			 {Arg1,S1} = expr(Arg,S0),
-			 {typeof(Arg1),S1};
+			 {bic:typeof(Arg1),S1};
 		     false ->
 			 type(Arg,Ln,S0)
 		 end,
@@ -392,14 +392,14 @@ expr(X=#bic_unary { line=Ln, op=typeof, arg=Arg }, S0) ->
     {Type1,S2} = case bic:is_expr(Arg, S0) of
 		     true ->
 			 {Arg1,S1} = expr(Arg,S0),
-			 {typeof(Arg1),S1};
+			 {bic:typeof(Arg1),S1};
 		     false ->
 			 type(Arg,Ln,S0)
 		 end,
     {X#bic_unary{ arg=Type1 }, S2};
 expr(X=#bic_unary { line=Ln, op=Op, arg=Arg}, S0) ->
     {CArg,S1} = expr(Arg,S0),
-    {CType,S2} = check_type(Ln,Op,typeof(CArg),S1),
+    {CType,S2} = check_type(Ln,Op,bic:typeof(CArg),S1),
     {X#bic_unary { type=CType, arg=CArg }, S2};
 expr(X=#bic_binary { line=Ln, op=cast, arg1=Type, arg2=Arg2}, S0) ->
     {CArg2,S1} = expr(Arg2,S0),
@@ -408,18 +408,19 @@ expr(X=#bic_binary { line=Ln, op=cast, arg1=Type, arg2=Arg2}, S0) ->
 expr(X=#bic_binary { line=Ln, op=Op, arg1=Arg1, arg2=Arg2}, S0) ->
     {CArg1,S1} = expr(Arg1,S0),
     {CArg2,S2} = expr(Arg2,S1),
-    {CType,S3} = check_type(Ln,Op,typeof(CArg1),typeof(CArg2),S2),
+    {CType,S3} = check_type(Ln,Op,bic:typeof(CArg1),bic:typeof(CArg2),S2),
     {X#bic_binary { type=CType,arg1=CArg1,arg2=CArg2}, S3};
 expr(X=#bic_call { line=Ln, func=Func, args=Args }, S0) ->
     {CFunc, S1} = expr(Func, S0),
     {CArgs, S2} = expr_list(Args, S1),
     %% check actal args with formal arguments 
-    {CType,S3} = check_type(Ln, call, typeof(CFunc), typeof_list(CArgs), S2),
+    {CType,S3} = check_type(Ln, call, bic:typeof(CFunc),
+			    [bic:typeof(T) || T <- CArgs], S2),
     {X#bic_call { func = CFunc, type=CType, args = CArgs }, S3};
 expr(X=#bic_assign { line=Ln, op=Op, lhs=Lhs, rhs=Rhs}, S0) ->
     {CLhs,S1} = expr(Lhs,S0), %% fixme check valid lhs!!
     {CRhs,S2} = expr(Rhs,S1), %% fixme check valid rhs (and undefined)
-    {CType,S3} = check_assign(Ln, Op, typeof(CLhs), typeof(CRhs), S2),
+    {CType,S3} = check_assign(Ln, Op, bic:typeof(CLhs), bic:typeof(CRhs), S2),
     {X#bic_assign { type=CType, lhs=CLhs, rhs=CRhs}, S3};
 expr(X=#bic_ifexpr { line=Ln, test=Test, then=Then, else=Else}, S0) ->
     {CTest,S1} = expr(Test,S0),
@@ -445,7 +446,7 @@ expr_list_([],Si,Acc) ->
 
 check_type(Ln, Op, T, S) ->
     if Op =:= '~'; Op =:= '!' ->
-	    case is_int_type(T) of
+	    case bic:is_int_type(T) of
 		true -> {T#bic_type{line=Ln}, S};
 		false ->
 		    %% coerce pointer to integer
@@ -465,7 +466,7 @@ check_type(Ln, Op, T, S) ->
 		    {#bic_type{line=Ln,type=int}, S1}
 	    end;
        Op =:= '-'; Op =:= '+' ->
-	    case is_number_type(T) of
+	    case bic:is_number_type(T) of
 		true ->
 		    {T#bic_type{line=Ln},S};
 		_ ->
@@ -474,11 +475,11 @@ check_type(Ln, Op, T, S) ->
 		    {T#bic_type{line=Ln}, S1}
 	    end;
        Op =:= '++'; Op =:= '--'; Op =:= '+++'; Op =:= '---' ->
-	    case is_pointer_type(T) of
+	    case bic:is_pointer_type(T) of
 		true ->
 		    {T,S};
 		false ->
-		    case is_int_type(T) of
+		    case bic:is_int_type(T) of
 			true ->
 			    {T#bic_type{line=Ln},S};
 			false ->
@@ -495,14 +496,14 @@ check_type(Ln, Op, T, S) ->
 
 check_type(Ln, '[]', T1, T2, S) ->
     %% io:format("check_type ~p ~w ~w\n", ['[]',T1,T2]),
-    case is_int_type(T2) of
+    case bic:is_int_type(T2) of
 	false ->
 	    S1 = add_error(S,Ln,"index expression is not integer type",[]),
-	    {base_type(T1), S1};
+	    {bic:base_typeof(T1), S1};
 	true ->
-	    case is_address_type(T1) of
+	    case bic:is_address_type(T1) of
 		true ->
-		    {base_type(T1), S};
+		    {bic:base_typeof(T1), S};
 		false ->
 		    S1 = add_error(S,Ln,"subscript is not an array",[]),
 		    {#bic_type{line=Ln,type=int}, S1}
@@ -510,14 +511,14 @@ check_type(Ln, '[]', T1, T2, S) ->
     end;
 check_type(Ln, '+', T1, T2, S) ->
     %% io:format("check_type ~p ~w ~w\n", ['+',T1,T2]),
-    case is_number_type(T1) andalso is_number_type(T2) of
+    case bic:is_number_type(T1) andalso bic:is_number_type(T2) of
 	true ->
 	    {coerce(T1,T2), S};
 	false ->
-	    case (is_pointer_type(T1) andalso is_int_type(T2)) of
+	    case (bic:is_pointer_type(T1) andalso bic:is_int_type(T2)) of
 		true -> {T1,S};
 		false  ->
-		case (is_pointer_type(T2) andalso is_int_type(T1)) of
+		case (bic:is_pointer_type(T2) andalso bic:is_int_type(T1)) of
 		    true -> {T2,S};
 		    false ->
 			S1 = add_error(S,Ln,"bad argument to '+' operator",[]),
@@ -535,53 +536,9 @@ coerce(T1,_T2) ->
 check_assign(_Ln, _Op, Lhs, _Rhs, S0) ->
     {Lhs, S0}.
 
-is_int_type(Ct=#bic_type{}) ->
-    case Ct#bic_type.type of
-	char -> true;
-	int -> true;
-	_ -> false
-    end;
-is_int_type(#bic_enum{}) -> true;
-is_int_type(_) -> false.
-
-is_number_type(#bic_type{}) -> true;
-is_number_type(#bic_enum{}) -> true;
-is_number_type(_) -> false.
-
-base_type(#bic_pointer{type=Type}) -> Type;
-base_type(#bic_array{type=Type}) -> Type.
-
-is_address_type(Type) ->
-    is_array_type(Type) orelse is_pointer_type(Type).
-
-is_array_type(#bic_array{}) -> true;
-is_array_type(_) -> false.
-
-is_pointer_type(#bic_pointer{}) -> true;
-is_pointer_type(_) -> false.
-
 sizeof_type(Ln) ->
     %% #bic_type{ line=Ln, sign=unsigned, const=true, size=long, type=int}.
     #bic_typeid { line=Ln, name="size_t"}.
-
-typeof_list(Ts) ->
-    [typeof(T) || T <- Ts].
-
-typeof(#bic_constant{type=Type}) -> Type;
-typeof(#bic_id     {type=Type}) -> Type;
-typeof(#bic_unary  {type=Type}) -> Type;
-typeof(#bic_binary {type=Type}) -> Type;
-typeof(#bic_call   {type=Type}) -> Type;
-typeof(#bic_assign {type=Type}) -> Type;
-typeof(#bic_ifexpr {type=Type}) -> Type.
-
-lineof(#bic_constant {line=Line}) -> Line;
-lineof(#bic_id {line=Line}) -> Line;
-lineof(#bic_unary {line=Line}) -> Line;
-lineof(#bic_binary {line=Line}) -> Line;
-lineof(#bic_call {line=Line}) -> Line;
-lineof(#bic_assign {line=Line}) -> Line;
-lineof(#bic_ifexpr {line=Line}) -> Line.
 
 constant(C=#bic_constant { base=float, token=Val },S0) ->
     {Value, FloatType} = bic:token_to_float(Val),
