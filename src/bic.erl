@@ -57,43 +57,49 @@
 -type bic() :: [#bic_function{} | #bic_decl{}].
 
 main(Args) ->
-    main(Args, #{ defines => [] }).
+    main(Args, #{ }).
 
 main(["-m32" | Args], Opts) ->
-    main(Args, Opts#{ model => 32 });
+    main(Args, set_opt(model, 32, Opts));
 main(["-m64" | Args], Opts) ->
-    main(Args, Opts#{ model => 64 });
+    main(Args, set_opt(model, 64, Opts));
 main(["-cpp" | Args], Opts) ->
-    main(Args, Opts#{ cpp_only => true });
+    main(Args, set_opt(cpp_only, true, Opts));
 main(["-cdd" | Args], Opts) ->
-    main(Args, Opts#{ cpp_dump => true });
+    main(Args, set_opt(cpp_dump, true, Opts));
 main(["-nolint" | Args], Opts) ->
-    main(Args, Opts#{ lint => false });
+    main(Args, set_opt(lint, false, Opts));
 main(["-unique" | Args], Opts) ->
-    main(Args, Opts#{ unique => true });
+    main(Args, add_pass(unique,Opts));
+main(["-f",Func|Args],Opts) ->
+    main(Args, add_func(Func,Opts));
+main(["-u" | Args], Opts) ->
+    main(Args, add_pass(unique,Opts));
 main(["-unroll" | Args], Opts) ->
-    main(Args, Opts#{ unroll => true });
+    main(Args, add_pass(unroll,Opts));
+main(["-r" | Args], Opts) ->
+    main(Args, add_pass(unroll,Opts));
+main(["-unused" | Args], Opts) ->
+    main(Args, add_pass(unused,Opts));
+main(["-s" | Args], Opts) ->
+    main(Args, add_pass(unused,Opts));
+main(["-eval" | Args], Opts) ->
+    main(Args, add_pass(eval,Opts));
+main(["-e" | Args], Opts) ->
+    main(Args, add_pass(eval,Opts));
+main(["-ref" | Args], Opts) ->
+    main(Args, add_pass(ref,Opts));
+main(["-x" | Args], Opts) ->
+    main(Args, add_pass(ref,Opts));
 main(["-D",MacroValue|Args], Opts) ->
     case string:split(MacroValue,"=") of
-	[Macro,Value] ->
-	    Defs = maps:get(cpp, Opts, []),
-	    Defs1 = [{defined,Macro,Value}|Defs],
-	    main(Args, Opts#{ cpp => Defs1 });
-	[Macro] ->
-	    Defs = maps:get(cpp, Opts, []),
-	    Defs1 = [{defined,Macro,1}|Defs],
-	    main(Args, Opts#{ cpp => Defs1 })
+	[Macro,Value] -> main(Args,add_cpp(Macro,Value,Opts));
+	[Macro] -> main(Args,add_cpp(Macro,1,Opts))
     end;
 main(["-D"++MacroValue|Args], Opts) ->
     case string:split(MacroValue,"=") of
-	[Macro,Value] ->
-	    Defs = maps:get(cp, Opts, []),
-	    Defs1 = [{defined,Macro,Value}|Defs],
-	    main(Args, Opts#{ cpp => Defs1 });
-	[Macro] ->
-	    Defs = maps:get(cpp, Opts, []),
-	    Defs1 = [{defined,Macro,1}|Defs],
-	    main(Args, Opts#{ cpp => Defs1 })
+	[Macro,Value] -> main(Args,add_cpp(Macro,Value,Opts));
+	[Macro] -> main(Args,add_cpp(Macro,1,Opts))
     end;
 main(["-h"|_Args], _Opts) -> usage();
 main(["-help"|_Args], _Opts) -> usage();
@@ -107,31 +113,67 @@ main(Files, Opts) ->
     end.
 
 usage() ->
-    io:format("usage: bic [-m32|-m64] options -Dmacro=value files\n"),
+    io:format("usage: bic [-m32|-m64] options -Dmacro[=value] file ...\n"),
     io:format("OPTIONS\n"),
-    io:format("  -cpp      cpp only\n"),
-    io:format("  -nolint   skip lint\n"),
-    io:format("  -unique   make variables unique\n"),
-    io:format("  -unroll   unroll functions\n"),
+    io:format("  -cpp         cpp only\n"),
+    io:format("  -nolint      skip lint\n"),
+    io:format("  -f func-name add function\n"),
+    io:format("  -u|-unique   make variables unique (all or use -f)\n"),
+    io:format("  -r|-unroll   unroll functions (all or use -f)\n"),
+    io:format("  -s|-unused   remove unused variables (all or use -f)\n"),
+    io:format("  -e|-eval     eval constant expressions (all or use -f)\n"),
+    io:format("  -x|-ref      keep only functions in -f and called\n"),
     halt(0).
+
+add_cpp(Macro,Value,Opts) ->
+    Defs = get_opt(cpp, Opts, []),
+    Defs1 = [{define,Macro,Value}|Defs],
+    set_opt(cpp,Defs1,Opts).
+
+add_func(Func,Opts) ->
+    Fs = get_opt(func,Opts,[]),
+    Fs1 = [Func|Fs],
+    set_opt(func,Fs1,Opts).
+
+add_pass(Pass,Opts) ->
+    Ps = get_opt(pass,Opts,[]),
+    Fs = get_opt(func,Opts,[]),
+    Ps1 = Ps++[{Pass,Fs}],
+    Opts1 = set_opt(pass,Ps1,Opts),
+    set_opt(func,Opts1,[]).
+
+get_opt(Key, Opts, Default) when is_atom(Key) ->
+    maps:get(Key, Opts, Default).
+get_opt(Key, Opts) when is_atom(Key) ->
+    maps:get(Key, Opts).
+
+set_opt(Key, Value, Opts) when is_atom(Key) ->
+    maps:put(Key, Value, Opts).
 
 run([Filename|Files], Opts) ->
     case file(Filename, Opts) of
-	{ok,Forms} ->
-	    Forms1 =
-		case maps:get(unique, Opts, false) of
-		    true ->
-			bic_transform:unique(Forms);
-		    false ->
-			Forms
-		end,
-	    io:put_chars(bic_format:definitions(Forms1)),
+	{ok,Defs} ->
+	    Defs1 = run_pass(get_opt(pass,Opts,[]), Defs),
+	    io:put_chars(bic_format:definitions(Defs1)),
 	    run(Files, Opts);
 	_Err ->
 	    halt(1)
     end;
 run([], _Opts) ->
     halt(0).
+
+run_pass([{unique,Fs}|Ps], Defs) ->
+    run_pass(Ps,bic_unique:definitions(Defs,Fs));
+run_pass([{unroll,Fs}|Ps], Defs) ->
+    run_pass(Ps,bic_unroll:definitions(Defs,Fs));
+run_pass([{eval,Fs}|Ps], Defs) ->
+    run_pass(Ps,bic_eval:definitions(Defs,Fs));
+run_pass([{unused,Fs}|Ps], Defs) ->
+    run_pass(Ps,bic_unused:definitions(Defs,Fs));
+run_pass([{ref,Fs}|Ps], Defs) ->
+    run_pass(Ps,bic_ref:definitions(Defs,Fs));
+run_pass([], Defs) ->
+    Defs.
 
 string(String) ->
     string(String, #{}).
@@ -214,14 +256,15 @@ print(Filename, Opts) ->
 	    Error
     end.
 
+%% util to run uniq on a file
 unique(Filename) ->
     unique(Filename,#{}).
 
 unique(Filename, Opts) ->
     case file(Filename, Opts) of
-	{ok,Forms} ->
-	    Forms1 = bic_transform:unique(Forms),
-	    io:put_chars(bic_format:definitions(Forms1));
+	{ok,Defs} ->
+	    Defs1 = bic_unique:definitions(Defs),
+	    io:put_chars(bic_format:definitions(Defs1));
 	Error ->
 	    Error
     end.
@@ -236,6 +279,7 @@ parse(Filename, Opts) ->
     CppOpts = maps:get(cpp, Opts, []),
     CppOpts1 = [{define,"__bic__", 1},
 		{define,"__bic_extension_bitfield__", 1} | CppOpts],
+    io:format("filename = ~p, cppopts=~p\n", [Filename, CppOpts1]),
     case bic_cpp:open(Filename, CppOpts1) of
 	{ok,Fd} ->
 	    bic_scan:init(),  %% setup some dictionay stuff

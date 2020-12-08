@@ -9,10 +9,8 @@
 
 -compile(export_all).
 
--export([fold/3]).   %% fold over code (depth first)
+-export([fold/3, fold_list/3]).
 -export([used/1, calls/1]).
--export([unique/1]).
--export([func_ref/2]).
 
 -include_lib("../include/bic.hrl").
 
@@ -42,124 +40,11 @@ calls(Form) ->
 		   end, #{}, Form),
     maps:fold(fun(Call,true,A) -> [Call|A] end, [], Set).
 
-%% make (local) variables uniq
-
--spec unique(Ds::[bic_declaration()]) ->
-	  [bic_declaration()].
-
-unique([D|Ds]) ->
-    case D of
-	#bic_function{params=Params,body=Body} ->
-	    S1 = map_params(Params, new_scope()),
-	    {Body1,_} = unique_stmts(Body, S1),
-	    [D#bic_function{body=Body1} | unique(Ds)];
-	_ ->
-	    [D | unique(Ds)]
-    end;
-unique([]) ->
-    [].
-
-%% keep parameter names, they must be unique
-map_params(Decls, S) ->
-    lists:foldl(fun(#bic_decl{name=Name},Si) ->
-			decl(Name,Name,Si)
-		end, S, Decls).
-
-unique_stmts(Body, Map) ->
-    fold(
-      fun(F=#bic_begin{}, S0) ->
-	      S1 = push_scope(S0),
-	      {F, S1};
-	 (F=#bic_end{}, S0) ->
-	      S1 = pop_scope(S0),
-	      {F, S1};
-	 (F=#bic_id{name=V}, S0) ->
-	      V1 = maps:get(V, S0),
-	      {F#bic_id{name=V1}, S0};
-	 (F=#bic_decl{name=V},Si) ->
-	      case maps:find(V, Si) of
-		  error ->
-		      {F, decl(V,V,Si)};
-		  {ok,_W} ->
-		      Next = maps:get(next,Si),
-		      VV = V ++ "__" ++ integer_to_list(Next),
-		      %% FIXME: check if VV exist
-		      {F#bic_decl{name=VV}, decl(V, VV, Si#{ next => Next+1 })}
-	      end;
-	 (F, Mi) ->
-	      {F,Mi}
-      end, Map, Body).
-
-new_scope() ->
-    #{ next=>1, scope=>#{}, stack=>[] }.
-
-push_scope(S=#{ scope := Scope, stack := Stack }) ->
-    S#{ scope => #{}, stack=> [Scope|Stack] }.
-
-pop_scope(S=#{ scope := Scope, stack := Stack=[Scope1|Stack1] }) ->
-    S1 = maps:fold(
-	   fun(Var,_,Si) ->
-		   case find_var(Var,Stack) of
-		       {ok,W} ->
-			   ?dbg("pop: ~s => ~s\n", [Var, W]),
-			   Si#{ Var => W }; %% restore
-		       error -> 
-			   ?dbg("remove: ~s\n", [Var]),
-			   maps:remove(Var,Si)  %% not used any more
-		   end
-	   end, S, Scope),
-    S1#{ scope=>Scope1, stack=>Stack1 }.
-
-decl(Name,NewName,S=#{ scope := Scope} ) ->
-    ?dbg("~s => ~s\n", [Name, NewName]),
-    S#{ Name => NewName, scope => Scope#{ Name => NewName } }.
-
-%% Check if Var is present in current scope stack
-find_var(Var, [Scope|Stack]) ->
-    case maps:find(Var, Scope) of
-	{ok,W} -> {ok,W};
-	error -> find_var(Var,Stack)
-    end;
-find_var(_Var, []) ->
-    error.
-
-%% - extract functions referenced in RefList
-%% - add functions that are referenced again
-
-func_ref(Stmts, []) ->
-    Stmts;
-func_ref(Stmts, RefList) ->
-    %% partition Stms in functions=S0,from non-functions S1
-    {S0,S1} = lists:partition(fun(S) -> is_record(S, bic_function) end, Stmts),
-    %% partition functions in Referenced S2 and unreferenced S3
-    {S2,S3} = 
-	lists:partition(
-	  fun(#bic_function{name=Name}) ->
-		  lists:member(Name, RefList)
-	  end, S0),
-    %% extract all calls from S2
-    {_,Calls} = 
-	fold(
-	  fun(F=#bic_call{func=#bic_id{name=Name}}, Set) ->
-		  {F,Set#{ Name => true }};
-	     (F,Set) -> 
-		  {F,Set}
-	  end, #{}, S2),
-
-    %% Add all functions in S3 that are in Calls
-    S4 = 
-	lists:filter(
-	  fun(#bic_function{name=Name}) ->
-		  case maps:find(Name, Calls) of
-		      {ok,_} -> true;
-		      _ -> false
-		  end;
-	     (_) -> false
-	  end, S3),
-    S1 ++ S4 ++ S2.
 
 %% dive into expression and replace / remove statemets/expressions...
 
+%%fold(Fun, Acc0, Form) when is_list(Form) ->
+%%    fold_compound(Fun,Acc0,Line,Form);
 fold(Fun, Acc0, Form) ->
     case Form of
 	undefined ->
@@ -186,8 +71,8 @@ fold(Fun, Acc0, Form) ->
 	    Fun(Form1,Acc1);
 	#bic_ifexpr{test=C,then=T,else=E} ->
 	    {C1,Acc1} = fold(Fun, Acc0, C),
-	    {T1,Acc2} = fold(Fun,  Acc1, T),
-	    {E1,Acc3} = fold(Fun, E, Acc2),
+	    {T1,Acc2} = fold(Fun, Acc1, T),
+	    {E1,Acc3} = fold(Fun, Acc2, E),
 	    Form1 = Form#bic_ifexpr{test=C1,then=T1,else=E1},
 	    Fun(Form1,Acc3);
 	#bic_assign{lhs=Lhs, rhs=Rhs} ->
@@ -301,16 +186,6 @@ fold(Fun, Acc0, Form) ->
 	    {Stmts1,Acc1} = fold_compound(Fun,Acc0,Line,Stmts),
 	    Form1 = Form#bic_compound{code=Stmts1},
 	    Fun(Form1,Acc1)
-	%% alternate compound form, needed?
-	%% [] ->
-	%% {Form,Acc0};
-	%% _ when is_list(Form) ->
-	%% Line = element(2,hd(Form)), %% is this the line number?
-	%% {Form1,Acc1} = fold_compound(Fun,Acc0,Line,Form),
-	%%     Fun(Form1,Acc1);
-	%% unknown or ignored,
-	%% _ ->
-	%% {Form,Acc0}
     end.
 
 fold_compound(_Fun, Acc, _Line, undefined) -> %% undefine body, declaration
