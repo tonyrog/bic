@@ -291,40 +291,40 @@ statement(Stmt, I) ->
 	      expr(Init), ";", 
 	      expr(Test), ";",
 	      expr(Update), ") ",
-	      body(Body,I+1,"\n")];
+	      body(Body,I,0,"\n")];
 	 #bic_while{test=Test,body=Body} ->
 	     ["while ", "(", expr(Test), ") ",
-	      body(Body,I+1,"\n")];
+	      body(Body,I,0,"\n")];
 	 #bic_do{body=Body, test=Test} ->
-	     ["do ", body(Body,I+1,""),
+	     ["do ", body(Body,I,0,""),
 	      " while (", expr(Test), ")", ";\n" ];
 	 #bic_if{test=Test,then=Then,else=undefined} ->
 	     ["if ", "(", expr(Test), ")",
-	      body(Then,I+1,"\n")];
+	      body(Then,I+1,0,"\n")];
 	 #bic_if{test=Test,then=Then,else=Else} ->
 	     ["if ", "(", expr(Test), ")",
-	      body(Then,I+1,"\n"),
+	      body(Then,I+1,0,"\n"),
 	      " else ", 
-	      body(Else,I+1,"\n")];
+	      body(Else,I+1,0,"\n")];
 	 #bic_switch{expr=Expr,body=Body} ->
-	     ["switch ", "(", expr(Expr), ")",
-	      statement(Body,I+1)];
+	     ["switch ", "(", expr(Expr), ") ",
+	      body(Body,I-1,1,"\n")];
 	 #bic_case{expr=Expr, code=Code} ->
-	     ["case ", expr(Expr), ": ",
-	      statement(Code,I+1)];
+	     ["case ", expr(Expr), ":", "\n", statement(Code,I+1)];
 	 #bic_default{code=Code} ->
-	     ["default", ": ",
-	      statement(Code,I+1)];
+	     ["default", ": ", "\n", statement(Code,I+1)];
 	 #bic_label{name=Label, code=Code} ->
-	     [Label, ": ", statement(Code,I+1)];
+	     [Label, ": ","\n", statement(Code,I+1)];
 	 #bic_continue{} ->
-	     ["continue", ";\n"];
+	     [indent(1),"continue", ";\n"];
 	 #bic_break{} ->
-	     ["break", ";\n"];
+	     [indent(1),"break", ";\n"];
 	 #bic_return{expr=undefined} ->
 	     ["return", ";\n"];
 	 #bic_return{expr=Expr} ->
 	     ["return", " ", expr(Expr), ";\n"];
+	 #bic_goto{label=Label} ->
+	     ["goto", " ", Label, ";\n"];
 	 #bic_empty{} ->
 	     [";\n"];
 	 #bic_decl{} ->
@@ -333,12 +333,12 @@ statement(Stmt, I) ->
 	     [expr(Expr), ";\n"]
      end].
 
-body(#bic_compound{code=Stmts}, I, NL) when is_list(Stmts) ->
+body(#bic_compound{code=Stmts}, I, IE, NL) when is_list(Stmts) ->
     ["{","\n",
      statements(Stmts, I+1),
-     indent(I-1),"}", NL];
-body(Stmt, I, _NL) ->
-    ["\n", statement(Stmt,I)].
+     indent(I+IE),"}", NL];
+body(Stmt, I, _IE, _NL) ->
+    ["\n", statement(Stmt,I+1)].
 
 function_body(Stmts) when is_list(Stmts) ->
     ["{","\n",

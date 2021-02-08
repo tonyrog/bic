@@ -114,14 +114,19 @@ statement(Y=#bic_switch { expr=Expr, body=Body },S0) ->
     {CSwitch,pop_scope(S2)};
 statement(Y=#bic_label { name = Name, code = Code }, S0) ->
     {CCode,S1} = statement(Code,S0),
-    S1 = add_label(Name, S0),
+    S2 = add_label(Name, S1),
     CLabel = Y#bic_label { code=CCode },
-    {CLabel, S1};
-statement(Y=#bic_case { expr = Expr, code = Code }, S0) ->
-    {CExpr,S1} = expr(Expr,S0),
-    {CCode,S2} = statement(Code,S1),
+    {CLabel, S2};
+statement(Y=#bic_case { line=Ln, expr = Expr, code = Code }, S0) ->
+    S1 = case is_scope_type([switch],S0) of
+	     false ->
+		 add_error(S0,Ln,"case not within a switch statement", []);
+	     true -> S0
+	 end,
+    {CExpr,S2} = expr(Expr,S1),
+    {CCode,S3} = statement(Code,S2),
     CCase = Y#bic_case { expr=CExpr, code=CCode },
-    {CCase, S2};
+    {CCase, S3};
 statement(Y=#bic_goto { label=_Name }, S0) ->
     %% FIXME: resolve goto's later, may have forward refs!
     CGoto = Y,
