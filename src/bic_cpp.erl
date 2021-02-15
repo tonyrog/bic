@@ -452,7 +452,8 @@ read_2(S, {D,Bool}) when D=:='#if'; D=:='#ifdef'; D=:='#ifndef'->
 read_2(S, {'#elif',?TRUE}) ->
     case peek_if(S) of
 	{Tag,V,Ln} ->
-	    if Tag =:= '#ifdef'; Tag =:= '#ifndef'; Tag=:='#else' ->
+	    if Tag =/= '#if'; Tag =/= '#ifdef';
+	       Tag =/= '#ifndef'; Tag=/='#else' ->
 		    error(S, "#elif missing #if", []),
 		    read_1(S);
 	       V =:= ?SKIP ->
@@ -471,7 +472,8 @@ read_2(S, {'#elif',?TRUE}) ->
 read_2(S, {'#elif',?FALSE}) ->
     case peek_if(S) of
 	{Tag,V,Ln} ->
-	    if Tag =:= '#ifdef'; Tag =:= '#ifndef'; Tag =:='#else' ->
+	    if Tag =/= '#if'; Tag =/= '#ifdef';
+	       Tag =/= '#ifndef'; Tag =/='#else' ->
 		    error(S, "#elif missing #if", []),
 		    read_1(S);
 	       V =:= ?SKIP ->

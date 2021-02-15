@@ -314,7 +314,9 @@ parse(Filename, Opts) ->
 		    {error,parse_error};
 		{ok,Forms} ->
 		    {ok,Forms}
-	    end
+	    end;
+	Error = {error,_} ->
+	    Error
     end.
 
 dump_cpp_variables(Fd) ->

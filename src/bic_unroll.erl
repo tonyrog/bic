@@ -370,6 +370,7 @@ expr(X=#bic_assign{op='+=',lhs=Lhs,rhs=V},E) ->
 	    {X#bic_assign{lhs=Lhs1,rhs=V1}, E2}
     end;
 
+%% fixme && and ||
 expr(X=#bic_binary{op=Op,arg1=A,arg2=B}, E) ->
     {A1,E1} = expr(A,E),
     {B1,E2} = expr(B,E1),
