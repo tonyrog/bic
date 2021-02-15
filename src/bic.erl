@@ -112,18 +112,26 @@ main(["-D"++MacroValue|Args], Opts) ->
     end;
 main(["-h"|_Args], _Opts) -> usage();
 main(["-help"|_Args], _Opts) -> usage();
+main(["--h"|_Args], _Opts) -> usage();
+main(["--help"|_Args], _Opts) -> usage();
+main(["--"|Args], Opts) -> main_files(Args, Opts);
+main([Opt=[$-|_]|_], _Opts) -> usage(Opt);
 main([],_) ->
     io:format("bic: no input files\n"),
     halt(1);
-main(Files, Opts) ->
+main(Args, Opts) -> main_files(Args, Opts).
+
+
+main_files(Files, Opts) ->
     case run(Files, Opts) of
 	ok -> halt(0);
 	{error,_} -> halt(1)
     end.
 
 usage() ->
-    io:format("usage: bic [-m32|-m64] options -Dmacro[=value] file ...\n"),
+    io:format("usage: bic options -Dmacro[=value] file ...\n"),
     io:format("OPTIONS\n"),
+    io:format("  -m32 | -m64  word size\n"),
     io:format("  -cpp         cpp only\n"),
     io:format("  -nolint      skip lint\n"),
     io:format("  -f func-name add function\n"),
@@ -132,7 +140,13 @@ usage() ->
     io:format("  -s|-unused   remove unused variables (all or use -f)\n"),
     io:format("  -e|-eval     eval constant expressions (all or use -f)\n"),
     io:format("  -x|-ref      keep only functions in -f and called\n"),
+    io:format("  -h|-help     print this healp\n"),
     halt(0).
+
+usage(Opt) ->
+    io:format("unknown option ~s\n",[Opt]),
+    usage().
+
 
 add_cpp(Macro,Value,Opts) ->
     Defs = get_opt(cpp, Opts, []),
