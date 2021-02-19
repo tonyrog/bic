@@ -7,7 +7,7 @@
 
 -module(bic_ref).
 
--export([definitions/1, definitions/2]).
+-export([definitions/1, definitions/3]).
 
 -include_lib("bic/include/bic.hrl").
 -define(dbg(F,A), ok).
@@ -18,12 +18,13 @@
 definitions(Ds) ->
     Ds.
 
--spec definitions(Ds::bic_definitions(), FunctionNames::[string()]) ->
+-spec definitions(Ds::bic_definitions(),Options::map(),
+		  FunctionNames::[string()]) ->
 	  bic_definitions().
 
-definitions(Ds, []) ->
+definitions(Ds,_Opts,[]) ->
     Ds;
-definitions(Ds, Fs) ->
+definitions(Ds,_Opts,Fs) ->
     %% partition Stms in functions=S0,from non-functions S1
     {S0,S1} = lists:partition(fun(S) -> is_record(S, bic_function) end, Ds),
     %% partition functions in Referenced S2 and unreferenced S3

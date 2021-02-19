@@ -53,7 +53,7 @@
 -export([open/1,open/2,close/1,read/1, read_line/1]).
 -export([string/1, string/2]).
 -export([line/1, file/1, value/2, values/1]).
--export([command/0, command/1]).
+-export([main/0, main/1]).
 
 %% DEBUG
 -export([dump_file/1]).
@@ -71,9 +71,11 @@
 
 -ifdef(debug).
 -define(dbg(F,A), io:format(standard_error,(F),(A))).
+-define(dbg(F), io:format(standard_error,(F),[])).
 -compile(export_all).
 -else.
 -define(dbg(F,A), ok).
+-define(dbg(F), ok).
 -endif.
 
 -record(save,
@@ -154,15 +156,15 @@ values(PFd) ->
     gen_server:call(PFd, values).
 
 
-command() ->
+main() ->
     io:format(standard_error, "bicpp: no input files\n", []),
     halt(1).
 
-command([]) ->
+main([]) ->
     io:format(standard_error, "bicpp: no input files\n", []),
     halt(1);
-command([File|_]) ->
-    case dump_file(atom_to_list(File)) of
+main([File|_]) ->
+    case dump_file(File) of
 	ok ->
 	    halt(0);
 	{error,Reason} ->
@@ -452,16 +454,18 @@ read_2(S, {D,Bool}) when D=:='#if'; D=:='#ifdef'; D=:='#ifndef'->
 read_2(S, {'#elif',?TRUE}) ->
     case peek_if(S) of
 	{Tag,V,Ln} ->
-	    if Tag =/= '#if'; Tag =/= '#ifdef';
-	       Tag =/= '#ifndef'; Tag=/='#else' ->
-		    error(S, "#elif missing #if", []),
+	    if Tag =/= '#if', Tag =/= '#ifdef',
+	       Tag =/= '#ifndef', Tag=/='#else' ->
+		    error(S, "#elif missing #if/#else", []),
 		    read_1(S);
 	       V =:= ?SKIP ->
 		    read_1(S);
 	       V =:= ?TRUE -> %% skip,alread processed
+		    ?dbg("MOD_IF => SKIP\n"),
 		    S1 = mod_if(S,Tag,?SKIP,Ln),
 		    read_1(S1);
 	       V =:= ?FALSE -> %% take this clause
+		    ?dbg("MOD_IF => TRUE\n"),
 		    S1 = mod_if(S,'#elif',?TRUE,S#s.line),
 		    read_1(S1)
 	    end;
@@ -472,8 +476,8 @@ read_2(S, {'#elif',?TRUE}) ->
 read_2(S, {'#elif',?FALSE}) ->
     case peek_if(S) of
 	{Tag,V,Ln} ->
-	    if Tag =/= '#if'; Tag =/= '#ifdef';
-	       Tag =/= '#ifndef'; Tag =/='#else' ->
+	    if Tag =/= '#if', Tag =/= '#ifdef',
+	       Tag =/= '#ifndef', Tag =/='#else' ->
 		    error(S, "#elif missing #if", []),
 		    read_1(S);
 	       V =:= ?SKIP ->
@@ -540,7 +544,6 @@ read_token_line(S) ->
 %%
 emit_line(S, Data) ->
     N = S#s.line1 - S#s.line,
-    %% io:format("EMIT: L1=~w, L=~w [~p]\n", [S#s.line1, S#s.line, Data]),
     emit_line(S, Data, N).
 
 -define(AUTO_LINE_LIMIT, 9).
@@ -835,6 +838,10 @@ directive(S, Ts, ?FALSE) ->
 	    {'#else', S};
 	[{identifier,_Ln,"if"}|_] ->
 	    {{'#if',?FALSE}, S};
+	[{identifier,_Ln,"ifdef"}|_] ->
+	    {{'#ifdef',?FALSE}, S};
+	[{identifier,_Ln,"ifndef"}|_] ->
+	    {{'#ifndef',?FALSE}, S};
 	[{identifier,_Ln,"elif"}|Ts1] ->
 	    cpp_if(S,Ts1,'#elif');
 	_ ->
@@ -846,12 +853,11 @@ directive(S, Ts, ?TRUE) ->
 	[{identifier,_Ln,"if"},{blank,_,_}|Ts1] ->  %% #if <bool-expr>
 	    cpp_if(S,Ts1,'#if');
 
-	[{identifier,_Ln,"elif"}|Ts1] -> %% #elif <bool-expr>
-	    cpp_if(S,Ts1,'#elif');
+	[{identifier,_Ln,"elif"}|_Ts1] -> %% #elif <bool-expr>
+	    {{'#elif',?FALSE}, S};
 
 	%% #ifdef <id>
 	[{identifier,_Ln,"ifdef"},{blank,_,_},{identifier,_,Var}|_Ts1] ->
-	    %% io:format("#ifdef ~s is ~w\n", [Var, defined(S,Var)]),
 	    {{'#ifdef',defined(S,Var)},S};
 	[{identifier,_Ln,"ifdef"}|_Ts1] ->
 	    error(S,"no macro name given in #ifdef directive",[]),
@@ -1088,7 +1094,7 @@ restore(S,Tok) ->
 	[] ->
 	    {Tok,S};
 	[R | Is] ->
-	    ?dbg("Restore file ~s:~w\n", [File,Line]),
+	    ?dbg("Restore file ~s:~w\n", [R#save.file,R#save.line]),
 	    LBuf1 = S#s.lbuf ++ [auto_line(R#save.line,R#save.file,2)] ++ 
 		R#save.lbuf,
 	    S1 = S#s { file= R#save.file, 

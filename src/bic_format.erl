@@ -166,7 +166,6 @@ prio(#bic_unary{op=Op}) ->
     case Op of
 	sizeof -> 0;
 	typeof -> 0;
-	cast -> 0;
 	'+++' -> 0;  %% postfix ++
 	'---' -> 0;  %% postfix --
 	'+' -> 5;
@@ -180,6 +179,7 @@ prio(#bic_unary{op=Op}) ->
     end;
 prio(#bic_binary{op=Op}) ->
     case Op of
+	cast -> 0;
 	'[]' -> 0;
 	'*' -> 10;
 	'/' -> 10;

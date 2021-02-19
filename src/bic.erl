@@ -24,6 +24,7 @@
 -export([is_pointer_op/1]).
 
 -export([is_int_type/1]).
+-export([is_float_type/1]).
 -export([is_number_type/1]).
 -export([is_address_type/1]).
 -export([is_array_type/1]).
@@ -54,7 +55,7 @@
 -type cpp_options() :: [cpp_option()].
 
 -type bic_options() :: 
-	#{ model => undefined | 32 | 64,
+	#{ model => undefined | 32 | 64 | cl,
 	   cpp_only => boolean(),
 	   cpp_dump => boolean(),
 	   lint => boolean(),
@@ -72,6 +73,8 @@ main(["-m32" | Args], Opts) ->
     main(Args, set_opt(model, 32, Opts));
 main(["-m64" | Args], Opts) ->
     main(Args, set_opt(model, 64, Opts));
+main(["-mcl" | Args], Opts) ->
+    main(Args, set_opt(model, cl, Opts));
 main(["-cpp" | Args], Opts) ->
     main(Args, set_opt(cpp_only, true, Opts));
 main(["-cdd" | Args], Opts) ->
@@ -131,7 +134,7 @@ main_files(Files, Opts) ->
 usage() ->
     io:format("usage: bic options -Dmacro[=value] file ...\n"),
     io:format("OPTIONS\n"),
-    io:format("  -m32 | -m64  word size\n"),
+    io:format("  -m32 | -m64 | -mcl  word size\n"),
     io:format("  -cpp         cpp only\n"),
     io:format("  -nolint      skip lint\n"),
     io:format("  -f func-name add function\n"),
@@ -176,7 +179,7 @@ set_opt(Key, Value, Opts) when is_atom(Key) ->
 run([Filename|Files], Opts) ->
     case file(Filename, Opts) of
 	{ok,Defs} ->
-	    Defs1 = run_pass(get_opt(pass,Opts,[]), Defs),
+	    Defs1 = run_pass(get_opt(pass,Opts,[]), Opts, Defs),
 	    io:put_chars(bic_format:definitions(Defs1)),
 	    run(Files, Opts);
 	_Err ->
@@ -185,17 +188,17 @@ run([Filename|Files], Opts) ->
 run([], _Opts) ->
     halt(0).
 
-run_pass([{unique,Fs}|Ps], Defs) ->
-    run_pass(Ps,bic_unique:definitions(Defs,Fs));
-run_pass([{unroll,Fs}|Ps], Defs) ->
-    run_pass(Ps,bic_unroll:definitions(Defs,Fs));
-run_pass([{eval,Fs}|Ps], Defs) ->
-    run_pass(Ps,bic_eval:definitions(Defs,Fs));
-run_pass([{unused,Fs}|Ps], Defs) ->
-    run_pass(Ps,bic_unused:definitions(Defs,Fs));
-run_pass([{ref,Fs}|Ps], Defs) ->
-    run_pass(Ps,bic_ref:definitions(Defs,Fs));
-run_pass([], Defs) ->
+run_pass([{unique,Fs}|Ps], Opts, Defs) ->
+    run_pass(Ps,Opts,bic_unique:definitions(Defs,Opts,Fs));
+run_pass([{unroll,Fs}|Ps], Opts, Defs) ->
+    run_pass(Ps,Opts,bic_unroll:definitions(Defs,Opts,Fs));
+run_pass([{eval,Fs}|Ps],Opts,Defs) ->
+    run_pass(Ps,Opts,bic_eval:definitions(Defs,Opts,Fs));
+run_pass([{unused,Fs}|Ps],Opts,Defs) ->
+    run_pass(Ps,Opts,bic_unused:definitions(Defs,Opts,Fs));
+run_pass([{ref,Fs}|Ps],Opts,Defs) ->
+    run_pass(Ps,Opts,bic_ref:definitions(Defs,Opts,Fs));
+run_pass([],_Opts,Defs) ->
     Defs.
 
 string(String) ->
@@ -443,7 +446,9 @@ typeof(#bic_unary  {type=Type}) -> Type;
 typeof(#bic_binary {type=Type}) -> Type;
 typeof(#bic_call   {type=Type}) -> Type;
 typeof(#bic_assign {type=Type}) -> Type;
-typeof(#bic_ifexpr {type=Type}) -> Type.
+typeof(#bic_ifexpr {type=Type}) -> Type;
+typeof(N) when is_integer(N) -> #bic_type{type=int};
+typeof(F) when is_float(F) -> #bic_type{type=double}.
 
 %% types
 lineof(#bic_type{line=L}) -> L;
@@ -484,24 +489,32 @@ base_typeof(#bic_pointer{type=Type}) -> Type;
 base_typeof(#bic_array{type=Type}) -> Type.
 
 
-is_int_type(#bic_type{type=T}) ->
+is_int_type(#bic_type{type=T,sign=S,size=Z}) ->
     case T of
 	char -> true;
 	int -> true;
 	#bic_enum{} -> true;
+	undefined ->
+	    %% type is not complete check variants
+	    (S =/= undefined) orelse (Z =/= undefined);
 	_ -> false
     end;
 is_int_type(#bic_enum{}) -> true;
 is_int_type(_) -> false.
 
-
-is_number_type(#bic_type{type=T}) ->
+is_float_type(#bic_type{type=T}) ->
     case T of
-	int -> true;
+	float -> true;
+	double -> true;
+	_ -> false
+    end.
+
+is_number_type(Type=#bic_type{type=T}) ->
+    case T of
 	float -> true;
 	double -> true;
 	#bic_enum{} -> true;
-	_ -> false
+	_ -> is_int_type(Type)
     end;
 is_number_type(#bic_enum{}) -> true;
 is_number_type(_) -> false.

@@ -7,7 +7,7 @@
 
 -module(bic_unique).
 
--export([definitions/1, definitions/2]).
+-export([definitions/1, definitions/3]).
 
 -include("../include/bic.hrl").
 
@@ -15,12 +15,13 @@
 	  bic_definitions().
 
 definitions(Ds) ->
-    definitions(Ds,[]).
+    definitions(Ds,#{},[]).
 
--spec definitions(Ds::bic_definitions(), FunctionNames::[string()]) ->
+-spec definitions(Ds::bic_definitions(), Options::map(), 
+		  FunctionNames::[string()]) ->
 	  bic_definitions().
 
-definitions([D|Ds], Fs) ->
+definitions([D|Ds],Opts,Fs) ->
     case D of
 	#bic_function{name=Name,params=Params,body=Body} ->
 	    case (Fs =:= []) orelse lists:member(Name, Fs) of
@@ -28,18 +29,18 @@ definitions([D|Ds], Fs) ->
 		    S0 = bic_scope:new(),
 		    S1 = bic_scope:set(next,1,S0),
 		    %% keep parameter names, they must be unique
-		    S2 = lists:foldl(fun(#bic_decl{name=Name},Si) ->
-					     bic_scope:put(Name,Name,Si)
+		    S2 = lists:foldl(fun(#bic_decl{name=Para},Si) ->
+					     bic_scope:put(Para,Para,Si)
 				     end, S1, Params),
 		    {Body1,_} = statements(Body, S2),
-		    [D#bic_function{body=Body1} | definitions(Ds,Fs)];
+		    [D#bic_function{body=Body1} | definitions(Ds,Opts,Fs)];
 		false ->
-		    [D | definitions(Ds,Fs)]
+		    [D | definitions(Ds,Opts,Fs)]
 	    end;
 	_ ->
-	    [D | definitions(Ds,Fs)]
+	    [D | definitions(Ds,Opts,Fs)]
     end;
-definitions([],_Fs) ->
+definitions([],_Opts,_Fs) ->
     [].
 
 statements(undefined, Scope) ->

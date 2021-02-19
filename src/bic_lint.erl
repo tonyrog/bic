@@ -147,7 +147,7 @@ statement(Y=#bic_break {line=Ln}, S0) ->
 	     true -> S0
 	 end,
     {Y, S1};
-statement(Y=#bic_default {line=Ln}, S0) ->
+statement(Y=#bic_default {line=Ln, code = Code }, S0) ->
     S1 = case is_scope_type([switch],S0) of
 	     false -> 
 		 add_error(S0, Ln,
@@ -155,7 +155,9 @@ statement(Y=#bic_default {line=Ln}, S0) ->
 			   []);
 	     true -> S0
 	 end,
-    {Y, S1};
+    {CCode,S2} = statement(Code,S1),
+    CDefault = Y#bic_default { code=CCode },
+    {CDefault, S2};
 statement(Y=#bic_return { line=Ln,expr=Expr}, S0) ->
     {CExpr,S1} = expr(Expr,S0),
     F = S0#scope.func,
@@ -518,7 +520,7 @@ check_type(Ln, '+', T1, T2, S) ->
     %% io:format("check_type ~p ~w ~w\n", ['+',T1,T2]),
     case bic:is_number_type(T1) andalso bic:is_number_type(T2) of
 	true ->
-	    {coerce(T1,T2), S};
+	    {coerce_number(T1,T2), S};
 	false ->
 	    case (bic:is_pointer_type(T1) andalso bic:is_int_type(T2)) of
 		true -> {T1,S};
@@ -535,7 +537,8 @@ check_type(_Ln, _Op, T1, _T2, S) ->
     %% io:format("check_type ~p ~w ~w\n", [_Op,T1,_T2]),
     {T1, S}.
 
-coerce(T1,_T2) ->
+coerce_number(T1,_T2) ->
+    %% FAT fixme
     T1.
 
 check_assign(_Ln, _Op, Lhs, _Rhs, S0) ->
