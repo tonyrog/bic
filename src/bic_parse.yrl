@@ -157,7 +157,7 @@ logical_or_expr -> logical_or_expr '||' logical_and_expr :
 
 conditional_expr -> logical_or_expr : '$1'.
 conditional_expr -> logical_or_expr '?' logical_or_expr ':' conditional_expr :
-		  #bic_ifexpr { line=line('$2'),test='$1',then='$3',else='$5'}.
+		  #bic_ifexpr { line=line('$2'),test='$1',then='$3','else'='$5'}.
 
 assignment_expr -> conditional_expr : '$1'.
 assignment_expr -> unary_expr assignment_operator assignment_expr :
@@ -435,7 +435,7 @@ expression_statement -> expr ';' : #bic_expr_stmt{line=line('$1'),expr='$1'}.
 selection_statement -> 'if' '(' expr ')' statement :
 	    #bic_if {line=line('$1'),test='$3',then='$5'}.
 selection_statement -> 'if' '(' expr ')' statement 'else' statement :
-	    #bic_if {line=line('$1'),test='$3',then='$5',else='$7'}.
+	    #bic_if {line=line('$1'),test='$3',then='$5','else'='$7'}.
 selection_statement -> 'switch' '(' expr ')' statement :
 	    #bic_switch { line=line('$1'),expr='$3',body='$5'}.
 
@@ -512,21 +512,24 @@ Erlang code.
 
 -include("../include/bic.hrl").
 -import(lists, [map/2, member/2]).
--export([init/0]).
+-export([init/1]).
 
 %% -define(dbg(F,A), io:format((F),(A))).
 -define(dbg(F,A), ok).
 
-init() ->
+init(Opts) ->
     %% erase dictionay use
     erase(bic_is_typedef),
     lists:foreach(
       fun
 	  ({{bic_type,T},_}) -> erase({bic_type,T});
 	  (_) -> ok
-      end, get()).
-
-
+      end, get()),
+    lists:foreach(
+      fun({Name,Type}) ->
+	      %% io:format("predefine type = ~p\n", [Name]),
+	      put({bic_type,Name}, Type)
+      end, maps:get(bic_predefined_types, Opts, [])).
 
 select_params([], NewParams) ->
     NewParams;

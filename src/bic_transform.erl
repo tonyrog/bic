@@ -69,11 +69,11 @@ fold(Fun, Acc0, Form) ->
 	    {As1,Acc1} = fold_list(Fun,Acc0,As),
 	    Form1 = Form#bic_call{args=As1},
 	    Fun(Form1,Acc1);
-	#bic_ifexpr{test=C,then=T,else=E} ->
+	#bic_ifexpr{test=C,then=T,'else'=E} ->
 	    {C1,Acc1} = fold(Fun, Acc0, C),
 	    {T1,Acc2} = fold(Fun, Acc1, T),
 	    {E1,Acc3} = fold(Fun, Acc2, E),
-	    Form1 = Form#bic_ifexpr{test=C1,then=T1,else=E1},
+	    Form1 = Form#bic_ifexpr{test=C1,then=T1,'else'=E1},
 	    Fun(Form1,Acc3);
 	#bic_assign{lhs=Lhs, rhs=Rhs} ->
 	    {Rhs1,Acc1} = fold(Fun, Acc0, Rhs),
@@ -146,11 +146,11 @@ fold(Fun, Acc0, Form) ->
 	    {C1,Acc2} = fold(Fun, Acc1, C),
 	    Form1 = Form#bic_do{test=C1,body=B1},
 	    Fun(Form1,Acc2);
-	#bic_if{test=C, then=T, else=E } ->
+	#bic_if{test=C, then=T, 'else'=E } ->
 	    {C1,Acc1} = fold(Fun, Acc0, C),
 	    {T1,Acc2} = fold(Fun, Acc1, T),
 	    {E1,Acc3} = fold(Fun, Acc2, E),
-	    Form1 = Form#bic_if{test=C1,then=T1,else=E1},
+	    Form1 = Form#bic_if{test=C1,then=T1,'else'=E1},
 	    Fun(Form1,Acc3);
 	#bic_switch{expr=E,body=B} ->
 	    {E1,Acc1} = fold(Fun, Acc0, E),

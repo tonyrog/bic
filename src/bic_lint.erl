@@ -6,6 +6,7 @@
 %%% Created : 14 Sep 2013 by Tony Rogvall <tony@rogvall.se>
 
 -module(bic_lint).
+-export([definitions/2, definitions/3]).
 
 -compile(export_all).
 
@@ -29,8 +30,11 @@
 	}).
 
 definitions(Filename,Defs) ->
+    definitions(Filename,Defs,#{}).
+
+definitions(Filename,Defs,Opts) when is_list(Defs), is_map(Opts) ->
     %% io:format("Defs:\n~p\n", [Defs]),
-    {CDefs,Scope} = definitions_(Defs, [], new_scope(Filename)),
+    {CDefs,Scope} = definitions_(Defs, [], new_scope(Filename,Opts)),
     if Scope#scope.errors =:= [] ->
 	    report(Scope#scope.filename, Scope#scope.warnings),
 	    {ok,CDefs};
@@ -84,11 +88,11 @@ statement(Y=#bic_expr_stmt{expr=Expr}, S0) ->
     {Y#bic_expr_stmt{expr=CExpr}, S1};
 statement(Y=#bic_decl{}, S0) ->
     decl(Y, S0);
-statement(#bic_if { line=Ln,test=Test,then=Then,else=Else},S0) ->
+statement(#bic_if { line=Ln,test=Test,then=Then,'else'=Else},S0) ->
     {CTest,S1} = expr(Test,S0),
     {CThen,S2} = statement(Then,S1),
     {CElse,S3} = statement(Else,S2),
-    CIf = #bic_if { line=Ln,test=CTest, then=CThen, else=CElse },
+    CIf = #bic_if { line=Ln,test=CTest, then=CThen, 'else'=CElse },
     {CIf,S3};
 statement(Y=#bic_for{ init=Init,test=Test,update=Update,body=Body},S0) ->
     {CInit,S1} = expr(Init,S0),
@@ -362,6 +366,7 @@ type_(#bic_typeid { line=Ln,name=Name},_Ln,S) ->
 	    {#bic_type { type=int }, S1};
 	{ok,Yt} ->
 	    %% fixme: check interaction between T and T1
+	    %% io:format("Type=~s: ~p\n", [Name, Yt]),
 	    {Yt#bic_typedef.type,S}
     end;
 type_(Xt=#bic_enum{},_Ln,S)  ->
@@ -408,6 +413,15 @@ expr(X=#bic_unary { line=Ln, op=Op, arg=Arg}, S0) ->
     {CArg,S1} = expr(Arg,S0),
     {CType,S2} = check_type(Ln,Op,bic:typeof(CArg),S1),
     {X#bic_unary { type=CType, arg=CArg }, S2};
+
+%% FIXME!
+expr(X=#bic_binary { line=Ln, op='.', arg1=Arg1, arg2=Arg2}, S0) ->
+    {CArg1,S1} = expr(Arg1,S0),
+    %% {CArg2,S2} = expr(Arg2,S1),
+    %% {CType,S3} = check_type(Ln,Op,bic:typeof(CArg1),bic:typeof(CArg2),S2),
+    CType = #bic_type{line=Ln,type=int},
+    {X#bic_binary { type=CType,arg1=CArg1,arg2=Arg2}, S1};
+
 expr(X=#bic_binary { line=Ln, op=cast, arg1=Type, arg2=Arg2}, S0) ->
     {CArg2,S1} = expr(Arg2,S0),
     {CType,S2} = type(Type,Ln,S1),
@@ -429,14 +443,14 @@ expr(X=#bic_assign { line=Ln, op=Op, lhs=Lhs, rhs=Rhs}, S0) ->
     {CRhs,S2} = expr(Rhs,S1), %% fixme check valid rhs (and undefined)
     {CType,S3} = check_assign(Ln, Op, bic:typeof(CLhs), bic:typeof(CRhs), S2),
     {X#bic_assign { type=CType, lhs=CLhs, rhs=CRhs}, S3};
-expr(X=#bic_ifexpr { line=Ln, test=Test, then=Then, else=Else}, S0) ->
+expr(X=#bic_ifexpr { line=Ln, test=Test, then=Then, 'else'=Else}, S0) ->
     {CTest,S1} = expr(Test,S0),
     {CThen,S2} = expr(Then,S1),
     {CElse,S3} = expr(Else,S2),
     %% CThen and CElse must be compatible
     %% {CType,S3} = check_type(Op,CTest,CElse,S3),
     {CType,S4} = check_type(Ln,'==',CThen,CElse,S3),
-    {X#bic_ifexpr { type=CType, test=CTest, then=CThen, else=CElse}, S4};
+    {X#bic_ifexpr { type=CType, test=CTest, then=CThen, 'else'=CElse}, S4};
 expr(Xs, S0) when is_list(Xs) ->
     expr_list(Xs, S0).
 
@@ -586,12 +600,13 @@ clear_labels(S) ->
     S#scope { labels = [] }.
     
 
-new_scope(Filename) ->
-    #scope { 
-       filename = Filename,
-       typedefs = [#{}],
-       decls    = [#{}]
-      }.
+new_scope(Filename, Opts) ->
+    PreDefined = maps:get(bic_predefined_types, Opts, []),
+    store_types(PreDefined, #scope { 
+			       filename = Filename,
+			       typedefs = [#{}],
+			       decls    = [#{}]
+			      }).
 
 push_scope(S) ->
     push_scope(S, compound).
@@ -630,6 +645,11 @@ find_local_type(Name, S) ->
 
 store_type(Name, Type, S) ->
     S#scope { typedefs = store_in_dicts_(Name, Type, S#scope.typedefs) }.
+
+store_types([{Name,Type}|Ns], S) ->
+    store_types(Ns, store_type(Name, Type, S));
+store_types([], S) ->
+    S.
 
 find_decl(Name, S) ->
     find_in_dicts_(Name, S#scope.decls).

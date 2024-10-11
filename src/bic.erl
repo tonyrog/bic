@@ -46,7 +46,7 @@
 
 -include("../include/bic.hrl").
 
-%% -define(dbg(F,A), io:format((F),(A))).
+%%-define(dbg(F,A), io:format((F),(A))).
 -define(dbg(F,A), ok).
 
 -type cpp_option() :: {define,Name::string(),Value::term()} |
@@ -213,15 +213,23 @@ string(String, Opts) ->
 	     {define,"__bic_extension_bitfield__", 1} | CppOpts],
     case bic_cpp:string(String, CppOpts1) of
 	{ok,Fd} ->
-	    bic_scan:init(),  %% setup some dictionay stuff
-	    bic_parse:init(), %% setup some dictionay stuff
+	    bic_scan:init(Opts),  %% setup some dictionay stuff
+	    bic_parse:init(Opts), %% setup some dictionay stuff
 	    Res = (catch bic_parse:parse_and_scan({bic, scan, [Fd]})),
+	    CppRet = 
+		case maps:get(cpp_ret, Opts, false) of
+		    true ->
+			bic_cpp:values(Fd);
+		    false ->
+			undefined
+		end,
 	    case maps:get(cpp_dump, Opts, false) of
 		true ->
 		    dump_cpp_variables(Fd);
 		false ->
 		    ok
 	    end,
+	    BicFn = bic_cpp:file(Fd),
 	    bic_cpp:close(Fd),
 	    case Res of 
 		{error,{{Fn,Ln},Mod,Message}} when is_integer(Ln) ->
@@ -232,10 +240,14 @@ string(String, Opts) ->
 		{error,{Ln,Mod,Message}} when is_integer(Ln) ->
 		    %% io:format("Message: ~w\n", [Message]),
 		    io:format("~s:~w: ~s\n",
-			      ["*string*",Ln,Mod:format_error(Message)]),
+			      [BicFn,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
 		{ok,Forms} ->
-		    {ok,Forms}
+		    if CppRet =:= undefined ->
+			    {ok,Forms};
+		       true ->
+			    {ok,Forms,CppRet}
+		    end
 	    end;
 	Error ->
 	    Error
@@ -251,25 +263,35 @@ file(File) ->
 file(Filename,Opts) ->
     case parse(Filename, Opts) of
 	{ok,Defs} ->
-	    case maps:get(cpp_only, Opts, false) of
-		true ->
-		    {ok,Defs};
-		false ->
-		    case maps:get(lint, Opts, true) of
-			true ->
-			    case bic_lint:definitions(Filename,Defs) of
-				{ok,LintDefs} ->
-				    {ok,LintDefs};
-				Err={error,_} ->
-				    Err
-			    end;
-			false ->
-			    {ok,Defs}
-		    end
-	    end;
+	    file_ret(Filename, Defs, undefined, Opts);
+	{ok,Defs,CppRet} ->
+	    file_ret(Filename, Defs, CppRet, Opts);
 	Error ->
 	    Error
     end.
+
+file_ret(Filename, Defs, Cpp, Opts) ->
+    case maps:get(cpp_only, Opts, false) of
+	true -> file_ok(Defs, Cpp);
+	false ->
+	    case maps:get(lint, Opts, true) of
+		true ->
+		    case bic_lint:definitions(Filename,Defs,Opts) of
+			{ok,LintDefs} ->
+			    file_ok(LintDefs, Cpp);
+			Err={error,_} ->
+			    Err
+		    end;
+		false ->
+		    file_ok(Defs, Cpp)
+	    end
+    end.
+
+file_ok(Defs, undefined) ->
+    {ok, Defs};
+file_ok(Defs, Cpp) ->
+    {ok, Defs, Cpp}.
+
 
 print(Filename) ->
     print(Filename,#{}).
@@ -308,9 +330,16 @@ parse(Filename, Opts) ->
     %% io:format("filename = ~p, cppopts=~p\n", [Filename, CppOpts1]),
     case bic_cpp:open(Filename, CppOpts1) of
 	{ok,Fd} ->
-	    bic_scan:init(),  %% setup some dictionay stuff
-	    bic_parse:init(), %% setup some dictionay stuff
+	    bic_scan:init(Opts),  %% setup some dictionay stuff
+	    bic_parse:init(Opts), %% setup some dictionay stuff
 	    Res = (catch bic_parse:parse_and_scan({bic, scan, [Fd]})),
+	    CppRet = 
+		case maps:get(cpp_ret, Opts, false) of
+		    true ->
+			bic_cpp:values(Fd);
+		    false ->
+			undefined
+		end,
 	    case maps:get(cpp_dump, Opts, false) of
 		true ->
 		    dump_cpp_variables(Fd);
@@ -330,7 +359,11 @@ parse(Filename, Opts) ->
 			      [Filename,Ln,Mod:format_error(Message)]),
 		    {error,parse_error};
 		{ok,Forms} ->
-		    {ok,Forms}
+		    if CppRet =:= undefined ->
+			    {ok,Forms};
+		       true ->
+			    {ok,Forms,CppRet}
+		    end
 	    end;
 	Error = {error,_} ->
 	    Error
@@ -556,10 +589,11 @@ complete_type(A) -> A.
     
 
 combine_types(T1,T2) ->
-    ?dbg("combine_types: [ ~s ]  [ ~s ] => ",[format_type(T1),format_type(T2)]),
+    ?dbg("combine_types: [ ~s ]  [ ~s ] => ",
+	 [bic_format:type(T1),bic_format:type(T2)]),
     %% ?dbg("combine_types: [ ~w ]  [ ~w ] => ", [ T1, T2]),
     R = combine_types_(T1,T2),
-    ?dbg("[ ~s ]\n", [format_type(R)]),
+    ?dbg("[ ~s ]\n", [bic_format:type(R)]),
     %% ?dbg("[ ~w ]\n", [R]),
     R.
 
@@ -695,11 +729,19 @@ float_suffix(Cs, Type) ->
     {list_to_float(lists:reverse(Cs)), Type}.
 
 %% fixme wchar_t
-token_to_char([$',$\\|Cs]) ->
-    {Val,[$']} = escape(Cs),
-    {Val, #bic_type{ const=true, type=char} };
-token_to_char([$',C,$']) ->
-    {C, #bic_type{ const=true, type=char} }.
+token_to_char([$'|Cs]) ->
+    token_to_char_(Cs, [], #bic_type{ const=true, type=char}).
+
+token_to_char_([$\\|Cs], Acc, Type) ->
+    {C,Cs1} = escape(Cs),
+    token_to_string_(Cs1, [C|Acc], Type);
+token_to_char_([$'], Acc, Type) ->
+    {lists:reverse(Acc), Type};
+token_to_char_([C|Cs], Acc, Type) ->
+    token_to_char_(Cs, [C|Acc], Type);
+token_to_char_([], Acc, Type) ->
+    {lists:reverse(Acc), Type}.
+
 
 %% fixme wchar_t
 token_to_string(Token) ->

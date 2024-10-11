@@ -11,7 +11,9 @@
 
 -include("../include/bic.hrl").
 
+-compile({no_auto_import,[error/3]}).
 %% -define(debug, true).
+-define(DEFAULT_INCLUDES, ["/usr/local/include", "/usr/include"]).
 
 -define(Q, $\").  %% "stupid emacs mode!
 -define(LP,$\().
@@ -241,8 +243,12 @@ dump_defs(PFd) ->
 init([{string,String},UserOpts]) ->
     File = "*string*",
     Defs = init_defs(default_opts(File)++UserOpts),
-    Include = init_include(UserOpts,["/usr/local/include", 
-				     "/usr/include"]),
+    Include = case proplists:get_bool(no_default_includes,UserOpts) of
+		  true ->
+		      init_include(UserOpts,[]);
+		  false ->
+		      init_include(UserOpts,?DEFAULT_INCLUDES)
+	      end,
     QInclude = init_qinclude(UserOpts,[]),
     {ok,Cwd} = file:get_cwd(),
     S = #s { file = File,
@@ -265,8 +271,12 @@ init([{file,File},UserOpts]) ->
     case file:open(File,[read]) of
 	{ok,Fd} ->
 	    Defs = init_defs(default_opts(File)++UserOpts),
-	    Include = init_include(UserOpts,["/usr/local/include", 
-					     "/usr/include"]),
+	    Include = case proplists:get_bool(no_default_includes,UserOpts) of
+			  true ->
+			      init_include(UserOpts,[]);
+			  false ->
+			      init_include(UserOpts,?DEFAULT_INCLUDES)
+		      end,
 	    QInclude = init_qinclude(UserOpts,[]),
 	    S = #s { file = File,
 		     readf = fun() -> file:read(Fd, ?CHUNK_SIZE) end,
@@ -521,6 +531,8 @@ read_2(S, '#endif') ->
 	    error(S, "#endif missing #if/#ifdef/#ifndef", []), 
 	    read_1(S1)
     end;
+read_2(S, {'#module', Mod}) ->
+    {[], define(S, "MODULE", Mod)}; 
 read_2(S, eof) ->
     file:close(S#s.fd),
     ?dbg("CLOSE: ~s\n", [S#s.file]),
@@ -577,7 +589,7 @@ expand_line(S, Ts, Acc) ->
     case Ts of
 	[{blank,_Ln,Bs}|Ts1] ->
 	    expand_line(S,Ts1,Bs++Acc);
-	[{char,_Ln,$#},{blank,_Ln,_Bs}|Ts1] ->
+	[{char,Ln,$#},{blank,Ln,_Bs}|Ts1] ->
 	    directive(S, Ts1, stat_if(S));
 	[{char,_Ln,$#}|Ts1] ->
 	    directive(S, Ts1, stat_if(S));
@@ -977,9 +989,14 @@ directive(S, Ts, ?TRUE) ->
 	    warning_ts(S, Ts1),
 	    {empty, S};
 
+	%% special declaration
+	[{identifier,_Ln,"module"},{blank,_,_},{identifier,_,Mod}|_Ts1] ->
+	    {{'#module',Mod},S};
+
 	[{identifier,_Ln,Name}|_] ->
 	    error(S, "invalid preprocessing directive #~s",[Name]),
 	    {empty, S};
+
 
 	[] -> %% just an empty directive, let it through
 	    {empty, S};

@@ -24,7 +24,7 @@ continue	: {token,{continue,TokenLine}}.
 default	        : {token,{default,TokenLine}}.
 do		: {token,{do,TokenLine}}.
 double		: {token,{double,TokenLine}}.
-else		: {token,{else,TokenLine}}.
+else		: {token,{'else',TokenLine}}.
 enum		: {token,{enum,TokenLine}}.
 extern		: {token,{extern,TokenLine}}.
 float		: {token,{float,TokenLine}}.
@@ -63,7 +63,7 @@ while		: {token,{while,TokenLine}}.
 0{D}+{IS}?	    : {token,{octnum,TokenLine,TokenChars}}.
 {D}+{IS}?	    : {token,{decnum,TokenLine,TokenChars}}.
 
-'(.|[^\'])+'	    : {token,{chrnum,TokenLine,TokenChars}}.
+\'(\.|[^\'])+\'	    : {token,{chrnum,TokenLine,TokenChars}}.
 
 {D}+{E}{FS}?	      : {token,{flonum,TokenLine,TokenChars}}.
 {D}*\.{D}+({E})?{FS}? : {token,{flonum,TokenLine,TokenChars}}.
@@ -121,9 +121,9 @@ while		: {token,{while,TokenLine}}.
 
 Erlang code.
 
--export([init/0, scan/1]).
+-export([init/1, scan/1]).
 
-init() -> 
+init(_Opts) -> 
     erase(bic_scan_chars).
 
 %%

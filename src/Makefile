@@ -21,7 +21,7 @@ APP_TARGET=../ebin/$(APP).app
 all: $(APP_TARGET) $(ALL_OBJECTS)
 
 clean:
-	rm -f $(ALL_OBJECTS) *.core .*.d
+	rm -f $(ALL_OBJECTS) $(YRL_SRC:%.yrl=%.erl) $(XRL_SRC:%.xrl=%.erl) *.core .*.d
 
 ../ebin/%.beam: %.erl
 	$(ERLC) $(ERLC_FLAGS) -o ../ebin $<

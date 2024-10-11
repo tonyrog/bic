@@ -204,7 +204,7 @@
 	 type :: bic_type(),
 	 test :: bic_expr(),
 	 then :: bic_expr(),
-	 else :: bic_expr()
+	 'else' :: bic_expr()
 	}).
 -type bic_ifexpr() :: #bic_ifexpr{}.
 
@@ -292,10 +292,10 @@
 
 -record(bic_if,
 	  {
-	  line :: integer(),
-	  test :: bic_expr(),
-	  then :: bic_statement(),
-	  else :: bic_statement()
+	   line :: integer(),
+	   test :: bic_expr(),
+	   then :: bic_statement(),
+	   'else' :: bic_statement()
 	  }).
 -type bic_if() :: #bic_if{}.
 

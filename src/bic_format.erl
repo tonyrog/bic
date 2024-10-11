@@ -96,11 +96,11 @@ type(#bic_fn{type=Type,params=Ps}) ->
 type(#bic_struct{name=Name,elems=undefined}) ->
     ["struct ",optional(Name)];
 type(#bic_struct{name=Name,elems=Es}) ->
-    ["struct ",optional(Name),"{", decls(Es),"}"];
+    ["struct ",optional(Name),"{\n", decls(Es,"  ","\n"),"}"];
 type(#bic_union{name=Name,elems=undefined}) ->
     ["union ",optional(Name)];
 type(#bic_union{name=Name,elems=Es}) ->
-    ["union ",optional(Name),"{", decls(Es),"}"].
+    ["union ",optional(Name),"{", decls(Es,"  ","\n"),"}"].
 
 dim(#bic_type{type=T}) when not is_atom(T) ->
     dim(T);
@@ -132,11 +132,18 @@ enums([X|Xs]) -> [enum(X),",",enums(Xs)].
 
 -spec decl(Decl::bic_decl()) -> string().
 
+decl(#bic_decl{name=Name,storage=Storage,type=Type=#bic_fn{}}) ->
+    func_decl(Name,Storage,Type);
 decl(#bic_decl{name=undefined,storage=Storage,type=Type,size=Size,value=Init}) ->
     [storage(Storage),type(Type),dim(Type),field_size(Size),init(Init)];
 decl(#bic_decl{name=Name,storage=Storage,type=Type,size=Size,value=Init}) ->
     [storage(Storage),type(Type)," ",Name,dim(Type),
      field_size(Size),init(Init)].
+
+func_decl(undefined,Storage,#bic_fn{type=Type,params=Ps}) ->
+    [storage(Storage),type(Type)," (*)", "(", params(Ps), ")"];
+func_decl(Name,Storage,#bic_fn{type=Type,params=Ps}) ->
+    [storage(Storage),type(Type)," ",Name, "(", params(Ps), ")"].
 
 field_size(undefined) -> "";
 field_size(Size) -> [":",expr(Size)].
@@ -147,10 +154,10 @@ init(Init) -> ["=",expr(Init)].
 storage(undefined) -> "";
 storage(Storage) -> [atom_to_list(Storage)," "].
 
--spec decls(Decls::[bic_decl()]) -> string().
+-spec decls(Decls::[bic_decl()], Prefix::string(), Sep::string()) -> string().
 
-decls([]) -> [];
-decls([X|Xs]) -> [decl(X),";",decls(Xs)].
+decls([],_Pref,_Sep) -> [];
+decls([X|Xs],Pref,Sep) -> [Pref,decl(X),";",Sep,decls(Xs,Pref,Sep)].
 
 -spec params(Decls::[bic_decl()]) -> string().
 
@@ -181,6 +188,8 @@ prio(#bic_binary{op=Op}) ->
     case Op of
 	cast -> 0;
 	'[]' -> 0;
+	'.'  -> 0;
+	'->'  -> 0;
 	'*' -> 10;
 	'/' -> 10;
 	'%' -> 10;
@@ -220,6 +229,7 @@ prio(_) ->
 -spec expr(Expr::bic_expr()) -> string().
 
 expr(X) when is_integer(X) -> integer_to_list(X);
+expr(X) when is_float(X) -> io_lib_format:fwrite_g(X);
 expr(#bic_id{name=Name}) -> Name;
 expr(#bic_constant{token=Value}) -> Value;
 
@@ -245,6 +255,7 @@ expr(X=#bic_binary{op=Op,arg1=Arg1,arg2=Arg2}) ->
     P1 = prio(Arg1),
     P2 = prio(Arg2),
     %% io:format("~w (~w ~s ~w)\n", [P,P1,Op,P2]),
+    %% io:format("(arg1=~p op=~s arg2=~p)\n", [Arg1, Op, Arg2]),
     [if is_number(P),is_number(P1),P1 > P -> 
 	     ["(",expr(Arg1), ")"];
 	true -> expr(Arg1)
@@ -257,7 +268,7 @@ expr(X=#bic_binary{op=Op,arg1=Arg1,arg2=Arg2}) ->
      end];
 expr(#bic_call{func=F, args=Exprs}) ->
     [expr(F),"(",exprs(Exprs),")"];
-expr(#bic_ifexpr{test=C,then=T,else=E}) ->
+expr(#bic_ifexpr{test=C,then=T,'else'=E}) ->
     [expr(C),"?",expr(T),":",expr(E)];
 expr(#bic_assign{op=Op,lhs=L,rhs=R}) ->
     [expr(L),atom_to_list(Op),expr(R)];
@@ -298,10 +309,10 @@ statement(Stmt, I) ->
 	 #bic_do{body=Body, test=Test} ->
 	     ["do ", body(Body,I,0,""),
 	      " while (", expr(Test), ")", ";\n" ];
-	 #bic_if{test=Test,then=Then,else=undefined} ->
+	 #bic_if{test=Test,then=Then,'else'=undefined} ->
 	     ["if ", "(", expr(Test), ")",
 	      body(Then,I+1,0,"\n")];
-	 #bic_if{test=Test,then=Then,else=Else} ->
+	 #bic_if{test=Test,then=Then,'else'=Else} ->
 	     ["if ", "(", expr(Test), ")",
 	      body(Then,I+1,0,"\n"),
 	      " else ", 

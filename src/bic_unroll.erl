@@ -132,7 +132,7 @@ statement(S=#bic_goto{}, E) ->
 statement(S=#bic_label{code=Code}, E) ->
     {Code1, E1} = statement(Code,E),
     {S#bic_label{code=Code1}, E1};
-statement(S=#bic_if {test=Cond,then=Then,else=undefined}, E) ->
+statement(S=#bic_if {test=Cond,then=Then,'else'=undefined}, E) ->
     {Cond1,C1,E1} = expr(Cond, E),
     if is_integer(Cond1), Cond1 =/= 0 ->
 	    statement(Then,E1);
@@ -142,7 +142,7 @@ statement(S=#bic_if {test=Cond,then=Then,else=undefined}, E) ->
 	    {Then1,E2} = statement(Then,E1),
 	    {S#bic_if{test=C1,then=Then1},E2}
     end;
-statement(S=#bic_if {test=Cond,then=Then,else=Else}, E) ->
+statement(S=#bic_if {test=Cond,then=Then,'else'=Else}, E) ->
     {Cond1,C1,E1} = expr(Cond, E),
     if is_integer(Cond1), Cond1 =/= 0 ->
 	    statement(Then,E1);
@@ -151,7 +151,7 @@ statement(S=#bic_if {test=Cond,then=Then,else=Else}, E) ->
        true ->
 	    {Then1,E2} = statement(Then,E1),
 	    {Else1,E2} = statement(Else,E1), %% match E2!
-	    {S#bic_if{test=C1,then=Then1,else=Else1},E2}
+	    {S#bic_if{test=C1,then=Then1,'else'=Else1},E2}
     end;
 statement(S=#bic_return{line=Ln,expr=Expr}, E) ->
     %% FuncName = current_function(E),
@@ -397,6 +397,7 @@ expr(X=#bic_call{func=Func=#bic_id{name=Name},args=Args}, E0) ->
 	    F0 = new_env(maps:get(global,E1),maps:get(opts,E1)),
 	    F01 = push_env(F0),
 	    F1  = set_current_function(Name, F01),
+	    %% FIXME move ActualRef to "parent" scope! (push code?)
 	    {ActualRef,F20} = unique(Name++"_ref_", F1),
 	    {FuncValue,F21} = unique(Name++"_value_", F20),
 	    {ReturnLabel,F2} = unique(Name++"_label_", F21),
@@ -680,14 +681,14 @@ expr(X=#bic_binary{op=Op,arg1=A,arg2=B}, E) ->
 	false -> 
 	    {undefined,X1,E2}
     end;
-expr(X=#bic_ifexpr{test=C,then=A,else=B},E) ->
+expr(X=#bic_ifexpr{test=C,then=A,'else'=B},E) ->
     case expr(C,E) of
 	{1,_,E1} -> expr(A,E1);
 	{0,_,E1} -> expr(B,E1);
 	{_,C1,E1} ->
 	    {_,A1,E3} = expr(A,E1),
 	    {_,B1,E3} = expr(B,E1),  %% match E3!!
-	    {undefined,X#bic_ifexpr{test=C1,then=A1,else=B1},E3}
+	    {undefined,X#bic_ifexpr{test=C1,then=A1,'else'=B1},E3}
     end.
 
 expr_list(As, E) ->
@@ -702,6 +703,8 @@ expr_list_([], E, Acc, Vs) ->
 %% currently supported LHS simple var and simple array
 lhs_ref(Lhs=#bic_id{name=V}, E) ->
     {Lhs,V,E};
+lhs_ref(Lhs=#bic_binary{op='.',arg1=#bic_id{name=V},arg2=Field}, E) ->
+    {Lhs,{V,Field},E};
 lhs_ref(Lhs=#bic_binary{op='[]',arg1=#bic_id{name=V},arg2=Index}, E) ->
     {Index1,I1,E1} = expr(Index, E),
     if is_integer(Index1) ->
