@@ -200,7 +200,15 @@ fold_list(Fun, Acc, As) ->
     fold_list_(Fun, Acc, As, []).
 
 fold_list_(Fun, Acc0, [A|As], As1) ->
-    {A1,Acc1} = fold(Fun,Acc0,A),
-    fold_list_(Fun,Acc1,As,[A1|As1]);
+    case fold(Fun,Acc0,A) of
+	{false,Acc1} ->
+	    fold_list_(Fun,Acc1,As,As1);
+	{#bic_empty{},Acc1} ->
+	    fold_list_(Fun,Acc1,As,As1);
+	{A1,Acc1} when is_list(A1) ->
+	    fold_list_(Fun,Acc1,As,lists:reverse(A1,As1));
+	{A1,Acc1} ->
+	    fold_list_(Fun,Acc1,As,[A1|As1])
+    end;
 fold_list_(_Fun, Acc0, [], As1) ->
     {lists:reverse(As1), Acc0}.

@@ -290,10 +290,14 @@ indent(I) ->
 statement(Stmt) ->
     statement(Stmt, 0).
 
+statement(undefined, _I) -> 
+    "";
 statement(#bic_compound{code=Stmts}, I) when is_list(Stmts) ->
     [indent(I),"{","\n",
      statements(Stmts, I+1),
      indent(I),"}\n"];
+statement(#bic_label{name=Label, code=Code}, I) ->
+    [indent(0),Label, ": ","\n", statement(Code,I+1)];
 statement(Stmt, I) ->
     [indent(I),
      case Stmt of
@@ -324,8 +328,8 @@ statement(Stmt, I) ->
 	     ["case ", expr(Expr), ":", "\n", statement(Code,I+1)];
 	 #bic_default{code=Code} ->
 	     ["default", ": ", "\n", statement(Code,I+1)];
-	 #bic_label{name=Label, code=Code} ->
-	     [Label, ": ","\n", statement(Code,I+1)];
+	 %% #bic_label{name=Label, code=Code} ->
+	 %%  [Label, ": ","\n", statement(Code,I+1)];
 	 #bic_continue{} ->
 	     [indent(1),"continue", ";\n"];
 	 #bic_break{} ->
@@ -335,7 +339,7 @@ statement(Stmt, I) ->
 	 #bic_return{expr=Expr} ->
 	     ["return", " ", expr(Expr), ";\n"];
 	 #bic_goto{label=Label} ->
-	     ["goto", " ", Label, ";\n"];
+	     ["goto", " ", expr(Label), ";\n"];
 	 #bic_empty{} ->
 	     [";\n"];
 	 #bic_decl{} ->

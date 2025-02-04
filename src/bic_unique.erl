@@ -8,6 +8,7 @@
 -module(bic_unique).
 
 -export([definitions/1, definitions/3]).
+-export([definition/1, definition/3]).
 
 -include("../include/bic.hrl").
 
@@ -22,26 +23,32 @@ definitions(Ds) ->
 	  bic_definitions().
 
 definitions([D|Ds],Opts,Fs) ->
-    case D of
-	#bic_function{name=Name,params=Params,body=Body} ->
-	    case (Fs =:= []) orelse lists:member(Name, Fs) of
-		true ->
-		    S0 = bic_scope:new(),
-		    S1 = bic_scope:set(next,1,S0),
-		    %% keep parameter names, they must be unique
-		    S2 = lists:foldl(fun(#bic_decl{name=Para},Si) ->
-					     bic_scope:put(Para,Para,Si)
-				     end, S1, Params),
-		    {Body1,_} = statements(Body, S2),
-		    [D#bic_function{body=Body1} | definitions(Ds,Opts,Fs)];
-		false ->
-		    [D | definitions(Ds,Opts,Fs)]
-	    end;
-	_ ->
-	    [D | definitions(Ds,Opts,Fs)]
-    end;
+    D1 = definition(D, Opts, Fs),
+    [D1 | definitions(Ds,Opts,Fs)];
 definitions([],_Opts,_Fs) ->
     [].
+
+definition(D) ->
+    definition(D,#{},[]).
+
+definition(D=#bic_function{name=Name,params=Params,body=Body},
+	   _Opts,Fs) ->
+    case (Fs =:= []) orelse lists:member(Name, Fs) of
+	true ->
+	    S0 = bic_scope:new(),
+	    S1 = bic_scope:set(next,1,S0),
+	    %% keep parameter names, they must be unique
+	    S2 = lists:foldl(fun(#bic_decl{name=Para},Si) ->
+				     bic_scope:put(Para,Para,Si)
+			     end, S1, Params),
+	    {Body1,_} = statements(Body, S2),
+	    D#bic_function{body=Body1};
+	false ->
+	    D
+    end;
+definition(D, _Opts, _Fs) ->
+    D.
+
 
 statements(undefined, Scope) ->
     {undefined,Scope};
