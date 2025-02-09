@@ -314,13 +314,13 @@ statement(Stmt, I) ->
 	     ["do ", body(Body,I,0,""),
 	      " while (", expr(Test), ")", ";\n" ];
 	 #bic_if{test=Test,then=Then,'else'=undefined} ->
-	     ["if ", "(", expr(Test), ")",
-	      body(Then,I+1,0,"\n")];
+	     ["if ", "(", expr(Test), ") ",
+	      body(Then,I+1,-1,"\n")];
 	 #bic_if{test=Test,then=Then,'else'=Else} ->
-	     ["if ", "(", expr(Test), ")",
-	      body(Then,I+1,0,"\n"),
-	      " else ", 
-	      body(Else,I+1,0,"\n")];
+	     ["if ", "(", expr(Test), ") ",
+	      body(Then,I+1,-1,"\n"),
+	      [indent(I),"else "], 
+	      body(Else,I+1,-1,"\n")];
 	 #bic_switch{expr=Expr,body=Body} ->
 	     ["switch ", "(", expr(Expr), ") ",
 	      body(Body,I-1,1,"\n")];

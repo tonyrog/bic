@@ -75,7 +75,8 @@
 	 volatile  :: undefined | boolean(),
 	 inline    :: undefined | boolean(),
 	 size      :: bic_size(),
-	 type      :: undefined | '_' | void | char | int | float | double |
+	 type      :: undefined | '_' | void | 
+		      char | int | float | double |
 		      bic_struct() | bic_union() | bic_typeid() | bic_enum() |
 		      bic_pointer()
 	}).
@@ -260,7 +261,7 @@
 	 storage :: bic_storage(), %% storage class specifier
 	 type :: bic_type(),       %% return type
 	 params :: [bic_decl()],   %% list of parameters
-	 body   :: bic_compound()  %% function body
+	 body   :: [bic_statement()]  %% function body (rename to code?)
 	}).
 -type bic_function() :: #bic_function{}.
 

@@ -12,6 +12,11 @@
 
 -include("../include/bic.hrl").
 
+%%-define(dbg(F,A), io:format((F),(A))).
+%%-define(dbg(F), io:format((F))).
+-define(dbg(F,A), ok).
+-define(dbg(F), ok).
+
 -spec definitions(Ds::bic_definitions()) ->
 	  bic_definitions().
 
@@ -33,6 +38,7 @@ definition(D) ->
 
 definition(D=#bic_function{name=Name,params=Params,body=Body},
 	   _Opts,Fs) ->
+    ?dbg("unique function ~s \n", [Name]),
     case (Fs =:= []) orelse lists:member(Name, Fs) of
 	true ->
 	    S0 = bic_scope:new(),
@@ -55,23 +61,28 @@ statements(undefined, Scope) ->
 statements(Body, Scope) when is_list(Body) ->
     bic_transform:fold_list(
       fun(F=#bic_begin{}, S0) ->
+	      ?dbg("push\n"),
 	      S1 = bic_scope:push(S0),
 	      {F, S1};
 	 (F=#bic_end{}, S0) ->
+	      ?dbg("pop\n"),
 	      S1 = bic_scope:pop(S0),
 	      {F, S1};
 	 (F=#bic_id{name=V}, S0) ->
 	      V1 = bic_scope:get(V, S0),
+	      ?dbg("lookup ~s = ~s\n", [V, V1]),
 	      {F#bic_id{name=V1}, S0};
 	 (F=#bic_decl{name=V}, S0) ->
 	      case bic_scope:get(V, S0, false) of
 		  false ->
+		      ?dbg("decl var ~s = ~s\n", [V,V]),
 		      {F, bic_scope:put(V,V,S0)};
 		  _W ->
 		      Next = bic_scope:get(next, S0),
 		      VV = V ++ "__" ++ integer_to_list(Next),
 		      S1 = bic_scope:set(next, Next+1, S0),
 		      S2 = bic_scope:put(V, VV, S1),
+		      ?dbg("decl var ~s = ~s\n", [V,VV]),
 		      {F#bic_decl{name=VV}, S2}
 	      end;
 	 (F, Mi) ->

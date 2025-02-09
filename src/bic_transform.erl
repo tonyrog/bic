@@ -16,6 +16,35 @@
 
 -define(dbg(F,A), ok).
 
+-define(assert_expr(E), 
+	case bic:is_expr((E)) of
+	    true -> ok;
+	    false -> 
+		io:format("~s:~w: assertion failed ~s not an expr\n",
+			  [?FILE, ?LINE, bic_format:expr((E))]),
+		exit({assertion_failed, E})
+	end).
+
+-define(assert_statement(S), 
+	case bic:is_statement((S)) of
+	    true -> ok;
+	    false -> 
+		io:format("~s:~w: assertion failed ~s not a statement\n",
+			  [?FILE, ?LINE, bic_format:statement((S))]),
+		exit({assertion_failed, S})
+	end).
+
+%% undefined or statement!
+-define(assert_maybe_statement(S), 
+	case ((S) =:= undefined) orelse bic:is_statement((S)) of
+	    true -> ok;
+	    false -> 
+		io:format("~s:~w: assertion failed ~s not a statement\n",
+			  [?FILE, ?LINE, bic_format:statement((S))]),
+		exit({assertion_failed, S})
+	end).
+					  
+
 -type form() :: bic_expr() | bic_statement() |
 		bic_declaration() | bic_forms().
 
@@ -57,10 +86,13 @@ fold(Fun, Acc0, Form) ->
 	#bic_constant{} ->
 	    Fun(Form,Acc0);
 	#bic_unary{arg=A} ->
+	    ?assert_expr(A),
 	    {A1,Acc1} = fold(Fun, Acc0, A),
 	    Form1 = Form#bic_unary{arg=A1},
 	    Fun(Form1,Acc1);
 	#bic_binary{arg1=A,arg2=B} ->
+	    ?assert_expr(A),
+	    ?assert_expr(B),
 	    {A1,Acc1} = fold(Fun, Acc0, A),
 	    {A2,Acc2} = fold(Fun, Acc1, B),
 	    Form1 = Form#bic_binary{arg1=A1,arg2=A2},
@@ -70,12 +102,17 @@ fold(Fun, Acc0, Form) ->
 	    Form1 = Form#bic_call{args=As1},
 	    Fun(Form1,Acc1);
 	#bic_ifexpr{test=C,then=T,'else'=E} ->
+	    ?assert_expr(C),
+	    ?assert_expr(T),
+	    ?assert_expr(E),
 	    {C1,Acc1} = fold(Fun, Acc0, C),
 	    {T1,Acc2} = fold(Fun, Acc1, T),
 	    {E1,Acc3} = fold(Fun, Acc2, E),
 	    Form1 = Form#bic_ifexpr{test=C1,then=T1,'else'=E1},
 	    Fun(Form1,Acc3);
 	#bic_assign{lhs=Lhs, rhs=Rhs} ->
+	    ?assert_expr(Lhs),
+	    ?assert_expr(Rhs),
 	    {Rhs1,Acc1} = fold(Fun, Acc0, Rhs),
 	    {Lhs1,Acc2} = fold(Fun, Acc1, Lhs),
 	    Form1 = Form#bic_assign{lhs=Lhs1,rhs=Rhs1},
@@ -114,6 +151,7 @@ fold(Fun, Acc0, Form) ->
 	    Fun(Form,Acc0);
 	%% DECLS
 	#bic_function{line=Line,type=T,params=Ps,body=B} ->
+	    %% body here is a list
 	    {T1,Acc1} = fold(Fun, Acc0, T),
 	    {Ps1,Acc2} = fold_list(Fun, Acc1, Ps),
 	    {B1,Acc3} = fold_compound(Fun, Acc2, Line, B),
@@ -126,49 +164,73 @@ fold(Fun, Acc0, Form) ->
 	    Fun(Form1,Acc2);
 	%% STATEMENTS
 	#bic_expr_stmt{expr=Expr} ->
+	    ?assert_expr(Expr),
 	    {Expr1,Acc1} = fold(Fun, Acc0, Expr),
 	    Form1 = Form#bic_expr_stmt{expr=Expr1},
 	    Fun(Form1,Acc1);
 	#bic_for{init=I,test=T,update=U,body=B} ->
+	    ?assert_expr(I),
+	    ?assert_expr(T),
+	    ?assert_expr(U),
+	    ?assert_statement(B),
 	    {I1,Acc1} = fold(Fun, Acc0, I),
 	    {T1,Acc2} = fold(Fun, Acc1, T),
 	    {U1,Acc3} = fold(Fun, Acc2, U),
 	    {B1,Acc4} = fold(Fun, Acc3, B),
-	    Form1 = Form#bic_for{init=I1,test=T1,update=U1,body=B1},
+	    Form1 = Form#bic_for{init=I1,test=T1,update=U1,
+				 body=make_compound(B1)},
 	    Fun(Form1,Acc4);
 	#bic_while{test=C,body=B} ->
+	    ?assert_expr(C),
+	    ?assert_statement(B),
 	    {C1,Acc1} = fold(Fun, Acc0, C),
 	    {B1,Acc2} = fold(Fun, Acc1, B),
-	    Form1 = Form#bic_while{test=C1,body=B1},
+	    Form1 = Form#bic_while{test=C1,
+				   body=make_compound(B1)},
 	    Fun(Form1,Acc2);
 	#bic_do{test=C,body=B} ->
+	    ?assert_expr(C),
+	    ?assert_statement(B),
 	    {B1,Acc1} = fold(Fun, Acc0, B),
 	    {C1,Acc2} = fold(Fun, Acc1, C),
-	    Form1 = Form#bic_do{test=C1,body=B1},
+	    Form1 = Form#bic_do{test=C1,body=make_compound(B1)},
 	    Fun(Form1,Acc2);
 	#bic_if{test=C, then=T, 'else'=E } ->
+	    ?assert_expr(C),
+	    ?assert_statement(T),
+	    ?assert_maybe_statement(E),
 	    {C1,Acc1} = fold(Fun, Acc0, C),
 	    {T1,Acc2} = fold(Fun, Acc1, T),
 	    {E1,Acc3} = fold(Fun, Acc2, E),
-	    Form1 = Form#bic_if{test=C1,then=T1,'else'=E1},
+	    Form1 = Form#bic_if{test=C1,
+				then=make_compound(T1),
+				'else'=make_compound(E1)},
 	    Fun(Form1,Acc3);
 	#bic_switch{expr=E,body=B} ->
+	    ?assert_expr(E),
+	    ?assert_statement(B),
 	    {E1,Acc1} = fold(Fun, Acc0, E),
 	    {B1,Acc2} = fold(Fun, Acc1, B),
-	    Form1 = Form#bic_switch{expr=E1,body=B1},
+	    Form1 = Form#bic_switch{expr=E1,
+				    body=make_compound(B1)},
 	    Fun(Form1,Acc2);
 	#bic_case{expr=E,code=B} ->
+	    ?assert_expr(E),
+	    ?assert_statement(B),
 	    {E1,Acc1} = fold(Fun, Acc0, E),
 	    {B1,Acc2} = fold(Fun, Acc1, B),
-	    Form1 = Form#bic_case{expr=E1,code=B1},
+	    Form1 = Form#bic_case{expr=E1,
+				  code=make_compound(B1)},
 	    Fun(Form1,Acc2);
 	#bic_default{code=B} ->
+	    ?assert_statement(B),
 	    {B1,Acc1} = fold(Fun, Acc0, B),
-	    Form1 = Form#bic_default{code=B1},
+	    Form1 = Form#bic_default{code=make_compound(B1)},
 	    Fun(Form1,Acc1);
 	#bic_label{code=B} ->
+	    ?assert_maybe_statement(B),
 	    {B1,Acc1} = fold(Fun, Acc0, B),
-	    Form1 = Form#bic_default{code=B1},
+	    Form1 = Form#bic_label{code=make_compound(B1)},
 	    Fun(Form1,Acc1);	    
 	#bic_goto{} ->
 	    Fun(Form,Acc0);
@@ -195,6 +257,16 @@ fold_compound(Fun, Acc, Line, Stmts) when is_list(Stmts) ->
     {Stmts1, Acc2} = fold_list(Fun, Acc1, Stmts),
     {_,Acc3} = Fun(#bic_end{line=Line}, Acc2),
     {Stmts1, Acc3}.
+
+%% compound if needed
+make_compound(List) when is_list(List) ->
+    #bic_compound{code=List};
+make_compound(Stmt) when is_tuple(Stmt) ->
+    Stmt;
+make_compound(undefined) ->
+    undefined.
+
+    
 
 fold_list(Fun, Acc, As) ->
     fold_list_(Fun, Acc, As, []).
